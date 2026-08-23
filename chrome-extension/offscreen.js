@@ -45,10 +45,12 @@ const pageProxy = {
   };
 
   function relayPageCall(tabId, op, args, pending) {
-    // Wrap chrome.* usage in a function so Pyodide's JS proxy calls it
-    // with the right receiver — accessing chrome.tabs off a PyProxy loses
-    // the binding and crashes with "Cannot read properties of undefined".
-    const send = () => chrome.tabs.sendMessage(tabId, { type: "PAGE_CALL", op, args });
+    // Offscreen documents have no chrome.tabs access — route through the
+    // background service worker via chrome.runtime, which forwards the
+    // PAGE_CALL to the content script in the target tab.
+    const send = () => chrome.runtime.sendMessage({
+      type: "PAGE_CALL_RELAY", tabId, op, args,
+    });
     const p = Promise.resolve().then(send).then((res) => {
       if (res && res.error) throw new Error(res.error);
       return res?.result;

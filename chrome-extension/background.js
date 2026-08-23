@@ -201,6 +201,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     sendResponse({ connected: !!(ws && ws.readyState === WebSocket.OPEN) });
     return;
   }
+  // offscreen document can't use chrome.tabs; relay its page calls
+  // to the content script in the target tab
+  if (msg.type === "PAGE_CALL_RELAY") {
+    chrome.tabs.sendMessage(msg.tabId, {
+      type: "PAGE_CALL", op: msg.op, args: msg.args || [],
+    }).then(sendResponse).catch((e) => sendResponse({ error: e.message }));
+    return true; // async response
+  }
 });
 
 chrome.action.onClicked?.addListener?.(() => {}); // popup handles clicks
