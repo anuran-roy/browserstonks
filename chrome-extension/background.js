@@ -43,16 +43,45 @@ function connect() {
     ws.onmessage = (ev) => {
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
-      if (msg.requestId && msg.sender && msg.tabId !== undefined) {
-        // forward the CLI's plan to the content script in the right tab
-        chrome.tabs.sendMessage(msg.tabId, {
-          type: "RUN_PROGRAM",
-          program: msg.program,
-          values: msg.values,
-          requestId: msg.requestId,
-        }).catch((e) => log("content script unreachable:", e.message));
+      if (msg.requestId && msg.sender && msg.tabId !== undefined && msg.program) {
+        // forward the CLI's plan to the offscreen document, which runs
+        // Pyodide (bundled WASM) and relays page calls to the content script
+        runProgramInOffscreen(msg).then((result) => {
+          log("fill result:", result);
+        }).catch((e) => log("fill failed:", e.message));
       }
     };
+  });
+}
+
+// ---------------------------------------------------------------- offscreen
+let offscreenCreating = null;
+
+async function ensureOffscreenDocument() {
+  const existing = await chrome.runtime.getContexts({
+    contextTypes: ["OFFSCREEN_DOCUMENT"],
+  });
+  if (existing.length > 0) return;
+  if (offscreenCreating) return offscreenCreating;
+  offscreenCreating = chrome.offscreen.createDocument({
+    url: "offscreen.html",
+    reasons: ["DOM_SCRAPING"],
+    justification: "Runs Pyodide (Python/WASM) to execute CLI-generated form-filling programs",
+  });
+  try {
+    await offscreenCreating;
+  } finally {
+    offscreenCreating = null;
+  }
+}
+
+async function runProgramInOffscreen(plan) {
+  await ensureOffscreenDocument();
+  return chrome.runtime.sendMessage({
+    type: "RUN_PROGRAM_OFFSCREEN",
+    tabId: plan.tabId,
+    program: plan.program,
+    values: plan.values,
   });
 }
 

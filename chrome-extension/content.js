@@ -8,9 +8,6 @@
   if (window.__browserstonksLoaded) return;
   window.__browserstonksLoaded = true;
 
-  const PYODIDE_URL = "https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js";
-  let pyodidePromise = null;
-
   function log(...args) {
     console.log("[browserstonks]", ...args);
   }
@@ -137,90 +134,55 @@
     return "generic";
   }
 
-  // ------------------------------------------------------------ Pyodide
-  function loadPyodideOnce() {
-    if (pyodidePromise) return pyodidePromise;
-    pyodidePromise = (async () => {
-      if (!window.loadPyodide) {
-        await new Promise((resolve, reject) => {
-          const s = document.createElement("script");
-          s.src = PYODIDE_URL;
-          s.onload = resolve;
-          s.onerror = () => reject(new Error("failed to load pyodide.js"));
-          document.head.appendChild(s);
-        });
-      }
-      log("booting pyodide (wasm)...");
-      return await window.loadPyodide({ indexURL: new URL(PYODIDE_URL, location.href).href.replace(/pyodide\.js$/, "") });
-    })();
-    return pyodidePromise;
-  }
-
-  // `page` helper object handed to the generated program's fill(page, VALUES)
-  function makePageHelper() {
-    const dispatch = (selector, type) => {
+  // `page` helper ops — executed in this tab on request of the offscreen
+  // document (which runs the Python program via Pyodide).
+  function pageOp(op, args) {
+    const dispatch = (el, type) => el.dispatchEvent(new Event(type, { bubbles: true }));
+    const q = (selector) => {
       const el = document.querySelector(selector);
       if (!el) throw new Error(`selector not found: ${selector}`);
-      el.dispatchEvent(new Event(type, { bubbles: true }));
+      return el;
     };
-    return {
-      set(selector, value, force) {
-        const el = document.querySelector(selector);
-        if (!el) throw new Error(`selector not found: ${selector}`);
-        // Never overwrite text the user (or a previous run) already entered,
-        // unless the program explicitly passes force=true.
-        const existing = (el.value ?? el.innerText ?? "").toString().trim();
-        if (existing && !force) {
-          log(`skip ${selector}: already filled (${existing.slice(0, 40)}…)`);
-          return false;
-        }
-        el.focus?.();
-        el.value = value;
-        dispatch(selector, "input");
-        dispatch(selector, "change");
-        return true;
-      },
-      click(selector) {
-        const el = document.querySelector(selector);
-        if (!el) throw new Error(`selector not found: ${selector}`);
-        el.click();
-        return true;
-      },
-      select(selector, value) {
-        const el = document.querySelector(selector);
-        if (!el || el.tagName !== "SELECT") throw new Error(`not a select: ${selector}`);
-        const opt = Array.from(el.options).find(
-          (o) => o.text.trim() === value || o.value === value);
-        if (!opt) throw new Error(`option not found: ${value}`);
-        el.value = opt.value;
-        dispatch(selector, "change");
-        return true;
-      },
-      submit() {
-        const btn = document.querySelector(
-          '[role="button"][aria-label*="Submit"], button[type="submit"], input[type="submit"]');
-        if (btn) btn.click();
-        return !!btn;
-      },
-    };
-  }
 
-  async function runProgram(program, values) {
-    const py = await loadPyodideOnce();
-    // Pass VALUES as a JSON string — simplest, most reliable bridge.
-    py.globals.set("VALUES_JSON", JSON.stringify(values || {}));
-    py.runPython("import json\nVALUES = json.loads(VALUES_JSON)");
-    const page = makePageHelper();
-    py.globals.set("page", page);
-    try {
-      py.runPython(program);
-      py.runPython("fill(page, VALUES)");
-      log("program finished");
-      return { ok: true };
-    } catch (e) {
-      log("program error:", e.message || String(e));
-      return { ok: false, error: String(e.message || e) };
+    if (op === "set") {
+      const [selector, value, force] = args;
+      const el = q(selector);
+      // Never overwrite text the user (or a previous run) already entered,
+      // unless the program explicitly passes force=true.
+      const existing = (el.value ?? el.innerText ?? "").toString().trim();
+      if (existing && !force) {
+        log(`skip ${selector}: already filled (${existing.slice(0, 40)}…)`);
+        return false;
+      }
+      el.focus?.();
+      el.value = value;
+      dispatch(el, "input");
+      dispatch(el, "change");
+      return true;
     }
+    if (op === "click") {
+      const [selector] = args;
+      q(selector).click();
+      return true;
+    }
+    if (op === "select") {
+      const [selector, value] = args;
+      const el = q(selector);
+      if (el.tagName !== "SELECT") throw new Error(`not a select: ${selector}`);
+      const opt = Array.from(el.options).find(
+        (o) => o.text.trim() === value || o.value === value);
+      if (!opt) throw new Error(`option not found: ${value}`);
+      el.value = opt.value;
+      dispatch(el, "change");
+      return true;
+    }
+    if (op === "submit") {
+      const btn = document.querySelector(
+        '[role="button"][aria-label*="Submit"], button[type="submit"], input[type="submit"]');
+      if (btn) btn.click();
+      return !!btn;
+    }
+    throw new Error(`unknown page op: ${op}`);
   }
 
   // ------------------------------------------------------------ messaging
@@ -229,11 +191,13 @@
       sendResponse(domState());
       return;
     }
-    if (msg.type === "RUN_PROGRAM") {
-      runProgram(msg.program, msg.values || {})
-        .then(sendResponse)
-        .catch((e) => sendResponse({ ok: false, error: String(e) }));
-      return true;
+    if (msg.type === "PAGE_CALL") {
+      try {
+        sendResponse({ result: pageOp(msg.op, msg.args || []) });
+      } catch (e) {
+        sendResponse({ error: String(e.message || e) });
+      }
+      return;
     }
     // ack probes (PING_CONTENT) and anything unknown so the caller never
     // sees "receiving end does not exist"
