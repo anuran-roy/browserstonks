@@ -235,6 +235,9 @@
         .catch((e) => sendResponse({ ok: false, error: String(e) }));
       return true;
     }
+    // ack probes (PING_CONTENT) and anything unknown so the caller never
+    // sees "receiving end does not exist"
+    sendResponse({ ok: true, pong: msg.type === "PING_CONTENT" });
   });
 
   log("content script ready");

@@ -73,11 +73,33 @@ function send(obj) {
 }
 
 // ---------------------------------------------------------------- actions
+// Make sure content.js is running in a tab. Declarative content_scripts
+// only inject on navigation, so tabs opened before the extension was
+// (re)loaded have no listener — inject on demand and let the IIFE guard
+// (window.__browserstonksLoaded) keep it idempotent.
+async function ensureContentScript(tabId) {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "PING_CONTENT" });
+    return; // already there
+  } catch {
+    // not injected yet — fall through and inject
+  }
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["content.js"],
+  });
+}
+
 // Ask the content script for the current DOM state, ship it to the CLI,
 // and let the CLI's reply flow back through ws.onmessage.
 async function fillActiveTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) return { error: "no active tab" };
+  if (!/^https?:/.test(tab.url || "")) {
+    return { error: "unsupported page (chrome://, Web Store, etc. cannot be scripted)" };
+  }
+
+  await ensureContentScript(tab.id);
 
   const dom = await chrome.tabs.sendMessage(tab.id, { type: "GET_DOM_STATE" })
     .catch((e) => ({ error: "content script not reachable: " + e.message }));
