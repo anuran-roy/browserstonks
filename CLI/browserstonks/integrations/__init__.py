@@ -69,13 +69,25 @@ class WebSocketIntegration(BaseIntegration):
                               f"from {msg.get('sender')}: "
                               f"{dom.get('url', '?')} "
                               f"({n_fields} fields)", flush=True)
-                        resp = self.handle(dom)
+                        try:
+                            resp = self.handle(dom)
+                        except Exception as e:  # noqa: BLE001
+                            import traceback
+                            traceback.print_exc()
+                            await ws.send(json.dumps({
+                                "error": f"planner failed: {e}",
+                                "requestId": msg.get("requestId"),
+                            }))
+                            continue
                         # echo routing fields so clients (e.g. the Chrome
                         # extension service worker) can match the reply
                         resp["requestId"] = msg.get("requestId")
                         resp["sender"] = msg.get("sender")
-                        resp["tabId"] = msg.get("tabId") or msg.get("dom", {}).get("tabId")
+                        resp["tabId"] = msg.get("tabId") or dom.get("tabId")
                         await ws.send(json.dumps(resp))
+                        print(f"[ws] plan response {msg.get('requestId')} sent "
+                              f"({len(resp.get('values', {}))} values, "
+                              f"{len(resp.get('program', ''))} chars)", flush=True)
                     elif msg.get("type") == "ping":
                         await ws.send(json.dumps({"type": "pong"}))
                     else:
