@@ -1,0 +1,11 @@
+// BrowserStonks rulebook: repeated answers matched by site / urlPattern.
+{
+  "defaults": {},
+  "rules": [
+    // {
+    //   "site": "google_forms",
+    //   "urlPattern": "docs\\.google\\.com",
+    //   "values": { "your name": "Anuran" }
+    // }
+  ]
+}

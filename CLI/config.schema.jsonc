@@ -1,0 +1,80 @@
+// Schema for BrowserStonks config.jsonc (JSON-Schema-flavoured, comments allowed).
+// `browserstonks doctor` validates config.jsonc against this file.
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BrowserStonks config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["llm", "integrations"],
+  "properties": {
+    "llm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": ["openrouter", "openai", "anthropic", "offline"],
+          "description": "LLM provider used to write form-filling programs"
+        },
+        "model": { "type": "string", "description": "Model id, e.g. openai/gpt-4o-mini" },
+        "api_key": { "type": "string", "description": "Prefer ${VAR} referencing .env" },
+        "base_url": { "type": "string", "description": "Custom OpenAI-compatible endpoint" },
+        "temperature": { "type": "number" },
+        "max_tokens": { "type": "integer" },
+        "timeout": { "type": "integer", "description": "HTTP timeout seconds" }
+      }
+    },
+    "integrations": {
+      "type": "object",
+      "description": "Transport integrations; names must match registered plugins",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "host": { "type": "string" },
+          "port": { "type": "integer" }
+        }
+      },
+      "properties": {
+        "websocket": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "host": { "type": "string" },
+            "port": { "type": "integer" }
+          }
+        },
+        "stdio": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "formAdapters": {
+      "type": "object",
+      "description": "Enable/disable plug-n-play site adapters",
+      "additionalProperties": { "type": "boolean" }
+    },
+    "answersFile": {
+      "type": "string",
+      "description": "Rulebook file (relative to config root) with saved answers"
+    },
+    "mcpServers": {
+      "type": "object",
+      "description": "Custom MCP servers launched over stdio JSON-RPC",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["command"],
+        "properties": {
+          "command": { "type": "string" },
+          "args": { "type": "array", "items": { "type": "string" } },
+          "env": { "type": "object", "additionalProperties": { "type": "string" } },
+          "enabled": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

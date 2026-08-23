@@ -1,0 +1,2 @@
+[console_scripts]
+browserstonks = browserstonks.cli:main

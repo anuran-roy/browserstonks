@@ -1,0 +1,17 @@
+README.md
+pyproject.toml
+browserstonks/__init__.py
+browserstonks/cli.py
+browserstonks/config.py
+browserstonks/form_adapters.py
+browserstonks/llm.py
+browserstonks/mcp.py
+browserstonks/planner.py
+browserstonks/plugins.py
+browserstonks.egg-info/PKG-INFO
+browserstonks.egg-info/SOURCES.txt
+browserstonks.egg-info/dependency_links.txt
+browserstonks.egg-info/entry_points.txt
+browserstonks.egg-info/requires.txt
+browserstonks.egg-info/top_level.txt
+browserstonks/integrations/__init__.py
