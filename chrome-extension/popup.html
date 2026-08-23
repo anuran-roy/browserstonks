@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 13px -apple-system, system-ui, sans-serif; width: 260px; padding: 12px; }
+    button { width: 100%; padding: 8px; border: 0; border-radius: 6px;
+             background: #4f46e5; color: #fff; font-weight: 600; cursor: pointer; }
+    button:disabled { background: #9ca3af; }
+    .status { margin-top: 8px; font-size: 12px; color: #6b7280; }
+    .url { margin-top: 6px; }
+    label { display: block; margin-top: 10px; font-size: 12px; color: #374151; }
+    input { width: 100%; box-sizing: border-box; padding: 5px; margin-top: 3px;
+            border: 1px solid #d1d5db; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <button id="fill">Fill this form</button>
+  <div class="status" id="status">checking CLI…</div>
+  <label>CLI WebSocket URL
+    <input id="wsUrl" placeholder="ws://127.0.0.1:8765">
+  </label>
+  <script src="popup.js"></script>
+</body>
+</html>
