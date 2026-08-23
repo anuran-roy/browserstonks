@@ -33,7 +33,16 @@ function connect() {
     ws = new WebSocket(url);
     ws.onopen = () => {
       log("connected to CLI");
-      while (pending.length) ws.send(JSON.stringify(pending.shift()));
+      while (pending.length) {
+        const m = pending.shift();
+        try {
+          ws.send(JSON.stringify(m));
+          log("flushed queued", m.type, m.requestId || "");
+          if (m.__resolve) m.__resolve();
+        } catch (e) {
+          log("flush failed:", e.message);
+        }
+      }
     };
     ws.onclose = () => {
       log("CLI disconnected; will retry on next action");
@@ -42,13 +51,25 @@ function connect() {
     ws.onerror = () => { /* onclose follows */ };
     ws.onmessage = (ev) => {
       let msg;
-      try { msg = JSON.parse(ev.data); } catch { return; }
+      try { msg = JSON.parse(ev.data); } catch {
+        log("unparseable message from CLI:", ev.data?.slice(0, 200));
+        return;
+      }
+      log("message from CLI:", JSON.stringify(msg).slice(0, 300));
+      if (msg.error) {
+        log("CLI returned an error:", msg.error);
+        return;
+      }
       if (msg.requestId && msg.sender && msg.tabId !== undefined && msg.program) {
         // forward the CLI's plan to the offscreen document, which runs
         // Pyodide (bundled WASM) and relays page calls to the content script
+        log("routing plan", msg.requestId, "to offscreen (tab", msg.tabId + ")…");
         runProgramInOffscreen(msg).then((result) => {
-          log("fill result:", result);
+          log("fill result:", JSON.stringify(result));
         }).catch((e) => log("fill failed:", e.message));
+      } else {
+        log("message from CLI ignored (missing routing fields):",
+            msg.requestId, msg.sender, msg.tabId, !!msg.program);
       }
     };
   });
@@ -87,17 +108,16 @@ async function runProgramInOffscreen(plan) {
 
 function send(obj) {
   return new Promise((resolve, reject) => {
-    const attempt = () => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(obj));
-        resolve();
-      } else {
-        pending.push(obj);
-        connect().catch(reject);
-        setTimeout(() => { try { resolve(); } catch { /* noop */ } }, 0);
-      }
-    };
-    attempt();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(obj));
+      log("sent to CLI:", obj.type, obj.requestId || "");
+      resolve();
+      return;
+    }
+    // not connected: queue and (re)connect; resolve only once sent
+    pending.push({ ...obj, __resolve: resolve });
+    log("CLI not connected; queued", obj.type, "(reconnecting…)");
+    connect().catch(reject);
   });
 }
 
@@ -129,10 +149,13 @@ async function fillActiveTab() {
   }
 
   await ensureContentScript(tab.id);
+  log("content script ready in tab", tab.id);
 
   const dom = await chrome.tabs.sendMessage(tab.id, { type: "GET_DOM_STATE" })
     .catch((e) => ({ error: "content script not reachable: " + e.message }));
   if (dom?.error) return dom;
+  log("DOM snapshot:", dom.forms?.length ?? 0, "form(s);",
+      (dom.forms || []).reduce((n, f) => n + (f.fields?.length || 0), 0), "field(s)");
 
   const requestId = "req_" + (++msgIdSeq.n);
   dom.client = "chrome-extension@0.1.0";

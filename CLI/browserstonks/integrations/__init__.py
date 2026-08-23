@@ -52,7 +52,7 @@ class WebSocketIntegration(BaseIntegration):
         import websockets
 
         async def on_conn(ws):
-            print(f"[ws] client connected: {ws.remote_address}")
+            print(f"[ws] client connected: {ws.remote_address}", flush=True)
             try:
                 async for raw in ws:
                     try:
@@ -61,7 +61,15 @@ class WebSocketIntegration(BaseIntegration):
                         await ws.send(json.dumps({"error": "bad json"}))
                         continue
                     if msg.get("type") == "plan":
-                        resp = self.handle(msg.get("dom", {}))
+                        dom = msg.get("dom", {})
+                        n_fields = sum(
+                            len(f.get("fields", []))
+                            for f in dom.get("forms", []))
+                        print(f"[ws] plan request {msg.get('requestId')} "
+                              f"from {msg.get('sender')}: "
+                              f"{dom.get('url', '?')} "
+                              f"({n_fields} fields)", flush=True)
+                        resp = self.handle(dom)
                         # echo routing fields so clients (e.g. the Chrome
                         # extension service worker) can match the reply
                         resp["requestId"] = msg.get("requestId")
