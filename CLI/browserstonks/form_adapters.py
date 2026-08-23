@@ -50,6 +50,7 @@ class GenericHTMLForms(BaseAdapter):
                     "options": f.get("options", []),
                     "required": bool(f.get("required")),
                     "selector": f.get("selector"),
+                    "value": f.get("value"),  # pre-filled text; planner skips these
                     "form": form.get("id") or form.get("index"),
                 })
         return {"site": self.name, "url": dom.get("url", ""), "fields": fields}
@@ -74,6 +75,7 @@ class GoogleFormsAdapter(BaseAdapter):
                 "options": f.get("options", []),
                 "required": "必須" in label or "*" in label or f.get("required"),
                 "selector": f.get("selector"),
+                "value": f.get("value"),
                 "form": "google-form",
             })
         return {"site": self.name, "url": dom.get("url", ""), "fields": fields}
@@ -118,6 +120,7 @@ class TypeformAdapter(BaseAdapter):
                 "options": f.get("options", []),
                 "required": bool(f.get("required")),
                 "selector": f.get("selector"),
+                "value": f.get("value"),
                 "form": "typeform",
             })
         return {"site": self.name, "url": dom.get("url", ""), "fields": fields}

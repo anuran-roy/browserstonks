@@ -104,6 +104,9 @@
         type,
         role: el.getAttribute("role") || undefined,
         required: el.required || el.getAttribute("aria-required") === "true",
+        // current value, so the CLI can leave pre-filled fields alone
+        value: (el.value || el.innerText || "").trim().slice(0, 200) || undefined,
+        checked: el.checked || undefined,
         options: el.tagName === "SELECT"
           ? Array.from(el.options).map((o) => o.text)
           : Array.from(el.closest('[role="listitem"], .question, .field')?.querySelectorAll('[role="radio"], [role="checkbox"], li') || [])
@@ -161,9 +164,16 @@
       el.dispatchEvent(new Event(type, { bubbles: true }));
     };
     return {
-      set(selector, value) {
+      set(selector, value, force) {
         const el = document.querySelector(selector);
         if (!el) throw new Error(`selector not found: ${selector}`);
+        // Never overwrite text the user (or a previous run) already entered,
+        // unless the program explicitly passes force=true.
+        const existing = (el.value ?? el.innerText ?? "").toString().trim();
+        if (existing && !force) {
+          log(`skip ${selector}: already filled (${existing.slice(0, 40)}…)`);
+          return false;
+        }
         el.focus?.();
         el.value = value;
         dispatch(selector, "input");

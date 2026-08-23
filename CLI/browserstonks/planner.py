@@ -39,6 +39,8 @@ options, selectors). Write Python that defines a function:
 `VALUES` is a dict mapping field labels (lowercased) to answers.
 Rules:
 - Only use selectors from the description.
+- Fields whose description has a non-empty "value" are ALREADY filled by
+  the user: do NOT touch them — skip set/click/select for those entirely.
 - For radio/checkbox, `page.click` the selector of the matching option.
 - Move through multi-step forms with page.click on next buttons.
 - Output ONLY the Python source, no markdown fences, no explanation.
@@ -98,6 +100,12 @@ class Planner:
             key = f'VALUES.get("{label}")'
             if not label:
                 continue
+            # Respect text the user already wrote: never generate a set()
+            # for a field that already has content. radio/checkbox/select
+            # still get filled; force-override with "force": true.
+            if f.get("value") and ftype not in ("radio", "checkbox", "select"):
+                if not f.get("force"):
+                    continue
             if ftype in ("radio", "checkbox"):
                 body.append(f"    v = {key}")
                 body.append(f"    if v: page.click({sel!r})")
