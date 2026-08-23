@@ -193,10 +193,18 @@
     }
     if (msg.type === "PAGE_CALL") {
       try {
-        sendResponse({ result: pageOp(msg.op, msg.args || []) });
+        const result = pageOp(msg.op, msg.args || []);
+        log(`page.${msg.op}(${(msg.args || []).slice(0, 2).join(", ")}) ->`, result);
+        sendResponse({ result });
       } catch (e) {
+        log(`page.${msg.op} FAILED:`, e.message);
         sendResponse({ error: String(e.message || e) });
       }
+      return;
+    }
+    if (msg.type === "STATUS_LOG") {
+      log(msg.message);
+      sendResponse({ ok: true });
       return;
     }
     // ack probes (PING_CONTENT) and anything unknown so the caller never

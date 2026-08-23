@@ -23,6 +23,20 @@ function log(...args) {
   console.log("[browserstonks]", ...args);
 }
 
+// Status surfaced without DevTools: badge on the toolbar icon + a line
+// in the page console (via the content script) so the user always sees
+// what the pipeline is doing.
+function badge(text, color = "#4f46e5") {
+  chrome.action.setBadgeText({ text: text || "" });
+  chrome.action.setBadgeBackgroundColor({ color });
+}
+
+async function pageLog(tabId, message) {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "STATUS_LOG", message });
+  } catch { /* content script may be gone; ignore */ }
+}
+
 // ---------------------------------------------------------------- websocket
 function connect() {
   return CLI_WS_URL().then((url) => {
@@ -58,15 +72,27 @@ function connect() {
       log("message from CLI:", JSON.stringify(msg).slice(0, 300));
       if (msg.error) {
         log("CLI returned an error:", msg.error);
+        badge("ERR", "#dc2626");
+        pageLog(msg.tabId, `[browserstonks] CLI error: ${msg.error}`);
         return;
       }
       if (msg.requestId && msg.sender && msg.tabId !== undefined && msg.program) {
         // forward the CLI's plan to the offscreen document, which runs
         // Pyodide (bundled WASM) and relays page calls to the content script
         log("routing plan", msg.requestId, "to offscreen (tab", msg.tabId + ")…");
+        badge("RUN");
+        pageLog(msg.tabId, `[browserstonks] program received (${Object.keys(msg.values || {}).length} values); running Pyodide…`);
         runProgramInOffscreen(msg).then((result) => {
           log("fill result:", JSON.stringify(result));
-        }).catch((e) => log("fill failed:", e.message));
+          const ok = result && result.ok;
+          badge(ok ? "OK" : "ERR", ok ? "#16a34a" : "#dc2626");
+          pageLog(msg.tabId, `[browserstonks] fill ${ok ? "succeeded" : "failed"}${result?.error ? ": " + result.error : ""}`);
+          setTimeout(() => badge(""), 8000);
+        }).catch((e) => {
+          log("fill failed:", e.message);
+          badge("ERR", "#dc2626");
+          pageLog(msg.tabId, `[browserstonks] fill failed: ${e.message}`);
+        });
       } else {
         log("message from CLI ignored (missing routing fields):",
             msg.requestId, msg.sender, msg.tabId, !!msg.program);
