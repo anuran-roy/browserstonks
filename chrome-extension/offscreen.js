@@ -37,12 +37,27 @@ async function runProgram(msg) {
   const py = await loadPyodideOnce();
   const pending = []; // JS promises for in-flight page calls
 
-  const pageProxy = {
+const pageProxy = {
     set: (sel, val, force) => relayPageCall(msg.tabId, "set", [sel, val, !!force], pending),
     click: (sel) => relayPageCall(msg.tabId, "click", [sel], pending),
     select: (sel, val) => relayPageCall(msg.tabId, "select", [sel, val], pending),
     submit: () => relayPageCall(msg.tabId, "submit", [], pending),
   };
+
+  function relayPageCall(tabId, op, args, pending) {
+    // Wrap chrome.* usage in a function so Pyodide's JS proxy calls it
+    // with the right receiver — accessing chrome.tabs off a PyProxy loses
+    // the binding and crashes with "Cannot read properties of undefined".
+    const send = () => chrome.tabs.sendMessage(tabId, { type: "PAGE_CALL", op, args });
+    const p = Promise.resolve().then(send).then((res) => {
+      if (res && res.error) throw new Error(res.error);
+      return res?.result;
+    }).catch((e) => {
+      throw new Error(`page.${op} failed: ${e.message}`);
+    });
+    pending.push(p);
+    return p;
+  }
 
   py.globals.set("page", pageProxy);
   // VALUES crosses the JS/Python boundary as a JSON string
@@ -60,19 +75,6 @@ async function runProgram(msg) {
     log("program error:", e.message || String(e));
     return { ok: false, error: String(e.message || e) };
   }
-}
-
-function relayPageCall(tabId, op, args, pending) {
-  const p = chrome.tabs.sendMessage(tabId, { type: "PAGE_CALL", op, args })
-    .then((res) => {
-      if (res && res.error) throw new Error(res.error);
-      return res?.result;
-    })
-    .catch((e) => {
-      throw new Error(`page.${op} failed: ${e.message}`);
-    });
-  pending.push(p);
-  return p;
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
