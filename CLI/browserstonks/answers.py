@@ -61,7 +61,8 @@ async def get_answer(field: dict[str, Any],
         if options:
             prompt += f"Options: {', '.join(map(str, options[:20]))}\n"
         try:
-            answer = provider.complete(ANSWER_SYSTEM_PROMPT, prompt).strip()
+            answer = provider.complete(ANSWER_SYSTEM_PROMPT, prompt)
+            answer = (answer or "").strip()
         except LLMError:
             answer = ""
         if answer:

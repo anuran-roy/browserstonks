@@ -132,7 +132,7 @@ class Planner:
     def _llm_program(self, description: dict) -> str:
         user = json.dumps(description, indent=2)
         out = self.provider.complete(SYSTEM_PROMPT, user)
-        out = out.strip()
+        out = (out or "").strip()
         if out.startswith("```"):
             out = re.sub(r"^```[a-zA-Z]*\n?|\n?```$", "", out)
         return out

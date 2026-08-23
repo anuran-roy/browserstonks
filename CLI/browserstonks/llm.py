@@ -38,8 +38,8 @@ class BaseProvider:
 
     def _extract(self, data: dict) -> str:
         try:
-            return data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError) as e:
+            return data["choices"][0]["message"]["content"] or ""
+        except (KeyError, IndexError, TypeError) as e:
             raise LLMError(f"unexpected provider response: {data}") from e
 
 
@@ -107,7 +107,7 @@ class AnthropicProvider(BaseProvider):
             },
         )
         try:
-            return "".join(b.get("text", "") for b in data["content"])
+            return "".join(b.get("text", "") for b in data["content"]) or ""
         except (KeyError, TypeError) as e:
             raise LLMError(f"unexpected anthropic response: {data}") from e
 
