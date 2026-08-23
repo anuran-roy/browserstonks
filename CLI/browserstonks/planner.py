@@ -22,6 +22,7 @@ from typing import Any
 
 from .form_adapters import detect_site
 from .llm import BaseProvider
+from .answers import get_answers
 
 SYSTEM_PROMPT = """You write small Python programs that fill web forms.
 You will be given a JSON description of a form (fields with labels, types,
@@ -66,12 +67,21 @@ class Planner:
         return None
 
     # -- program generation ---------------------------------------------------
-    def plan(self, description: dict[str, Any]) -> dict[str, Any]:
+    async def plan(self, description: dict[str, Any]) -> dict[str, Any]:
         site = description.get("site", "generic")
         url = description.get("url", "")
         values = self.lookup_answers(site, url)
         if values is None:
             values = self.rulebook.get("defaults", {})
+
+        # Rulebook values are keyed by lowercased label; generate answers
+        # for any field the rulebook didn't cover (LLM if configured).
+        fields = description.get("fields", [])
+        resolved = await get_answers(
+            fields, values=values, provider=self.provider,
+            context={"url": url, "site": site})
+        # rulebook/LLM merged answers (LLM only fills gaps, never overrides)
+        values = {**resolved, **{k: v for k, v in values.items() if v}}
 
         program = self._rule_program(description, values)
         if program is None and self.provider is not None:

@@ -163,10 +163,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
+    import asyncio
     cfg = Config(Path(args.root)).load()
     dom = json.loads(Path(args.dom).read_text())
     planner = _build_planner(cfg)
-    print(json.dumps(planner.plan(_describe(dom)), indent=2))
+    print(json.dumps(asyncio.run(planner.plan(_describe(dom))), indent=2))
     return 0
 
 

@@ -29,11 +29,11 @@ class BaseIntegration:
     async def start(self) -> None:  # pragma: no cover - overridden
         raise NotImplementedError
 
-    def handle(self, dom: dict[str, Any]) -> dict[str, Any]:
+    async def handle(self, dom: dict[str, Any]) -> dict[str, Any]:
         """Shared request handling: describe the form, plan the program."""
         adapter = extract_site_adapter(dom)
         description = adapter.describe(dom)
-        plan = self.planner.plan(description)
+        plan = await self.planner.plan(description)
         plan["client"] = dom.get("client", "unknown")
         return plan
 
@@ -70,7 +70,7 @@ class WebSocketIntegration(BaseIntegration):
                               f"{dom.get('url', '?')} "
                               f"({n_fields} fields)", flush=True)
                         try:
-                            resp = self.handle(dom)
+                            resp = await self.handle(dom)
                         except Exception as e:  # noqa: BLE001
                             import traceback
                             traceback.print_exc()
@@ -120,7 +120,8 @@ class StdioIntegration(BaseIntegration):
                 print(json.dumps({"error": "bad json"}), flush=True)
                 continue
             if msg.get("type") == "plan":
-                print(json.dumps(self.handle(msg.get("dom", {}))), flush=True)
+                resp = await self.handle(msg.get("dom", {}))
+                print(json.dumps(resp), flush=True)
             else:
                 print(json.dumps({"error": "unknown type"}), flush=True)
 
