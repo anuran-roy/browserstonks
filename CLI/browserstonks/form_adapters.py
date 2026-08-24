@@ -65,19 +65,28 @@ class GoogleFormsAdapter(BaseAdapter):
 
     def describe(self, dom: dict[str, Any]) -> dict[str, Any]:
         fields = []
-        for i, f in enumerate(dom.get("forms", [])):
-            label = f.get("label", "")
-            ftype = self._normalize_type(f.get("role", ""), label)
-            fields.append({
-                "id": f.get("id") or f"q{i}",
-                "label": label,
-                "type": ftype,
-                "options": f.get("options", []),
-                "required": "必須" in label or "*" in label or f.get("required"),
-                "selector": f.get("selector"),
-                "value": f.get("value"),
-                "form": "google-form",
-            })
+        idx = 0
+        for form in dom.get("forms", []):
+            # accept both shapes: a bare field list, or {fields: [...]}
+            raw_fields = form.get("fields") if isinstance(form, dict) else None
+            if raw_fields is None and isinstance(form, dict) and (
+                    form.get("label") or form.get("role") or form.get("type")):
+                raw_fields = [form]  # single field passed directly
+            for f in (raw_fields or []):
+                idx += 1
+                label = f.get("label", "")
+                ftype = self._normalize_type(
+                    f.get("role", "") or f.get("type", ""), label)
+                fields.append({
+                    "id": f.get("id") or f"q{idx}",
+                    "label": label,
+                    "type": ftype,
+                    "options": f.get("options", []),
+                    "required": "必須" in label or "*" in label or f.get("required"),
+                    "selector": f.get("selector"),
+                    "value": f.get("value"),
+                    "form": "google-form",
+                })
         return {"site": self.name, "url": dom.get("url", ""), "fields": fields}
 
     @staticmethod
@@ -112,17 +121,25 @@ class TypeformAdapter(BaseAdapter):
 
     def describe(self, dom: dict[str, Any]) -> dict[str, Any]:
         fields = []
-        for i, f in enumerate(dom.get("forms", [])):
-            fields.append({
-                "id": f.get("id") or f"tf{i}",
-                "label": f.get("label", ""),
-                "type": f.get("type", "text"),
-                "options": f.get("options", []),
-                "required": bool(f.get("required")),
-                "selector": f.get("selector"),
-                "value": f.get("value"),
-                "form": "typeform",
-            })
+        idx = 0
+        for form in dom.get("forms", []):
+            # accept both shapes: a bare field list, or {fields: [...]}
+            raw_fields = form.get("fields") if isinstance(form, dict) else None
+            if raw_fields is None and isinstance(form, dict) and (
+                    form.get("label") or form.get("role") or form.get("type")):
+                raw_fields = [form]  # single field passed directly
+            for f in (raw_fields or []):
+                idx += 1
+                fields.append({
+                    "id": f.get("id") or f"tf{idx}",
+                    "label": f.get("label", ""),
+                    "type": f.get("type", "text"),
+                    "options": f.get("options", []),
+                    "required": bool(f.get("required")),
+                    "selector": f.get("selector"),
+                    "value": f.get("value"),
+                    "form": "typeform",
+                })
         return {"site": self.name, "url": dom.get("url", ""), "fields": fields}
 
 

@@ -27,6 +27,7 @@ from typing import Type
 ENTRYPOINT_GROUPS = [
     "browserstonks_integrations",
     "browserstonks_form_adapters",
+    "browserstonks_harnesses",
 ]
 
 
@@ -34,6 +35,7 @@ class PluginRegistry:
     def __init__(self) -> None:
         self._integrations: dict[str, type] = {}
         self._adapters: dict[str, type] = {}
+        self._harnesses: dict[str, type] = {}
 
     # -- registration -------------------------------------------------------
     def register_integration(self, name: str, cls: type) -> None:
@@ -41,6 +43,9 @@ class PluginRegistry:
 
     def register_adapter(self, name: str, cls: type) -> None:
         self._adapters[name] = cls
+
+    def register_harness(self, name: str, cls: type) -> None:
+        self._harnesses[name] = cls
 
     # -- lookup -------------------------------------------------------------
     def integration(self, name: str) -> type:
@@ -64,6 +69,10 @@ class PluginRegistry:
     @property
     def adapters(self) -> dict[str, type]:
         return dict(self._adapters)
+
+    @property
+    def harnesses(self) -> dict[str, type]:
+        return dict(self._harnesses)
 
     # -- discovery ----------------------------------------------------------
     def load_local_plugins(self, plugins_dir: Path) -> list[str]:
@@ -117,6 +126,8 @@ class PluginRegistry:
                     self.register_integration(name, cls)
                 elif group == "browserstonks_form_adapters":
                     self.register_adapter(name, cls)
+                elif group == "browserstonks_harnesses":
+                    self.register_harness(name, cls)
 
 
 _registry: PluginRegistry | None = None

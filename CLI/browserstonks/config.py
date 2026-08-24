@@ -91,14 +91,18 @@ def load_dotenv(path: Path, override: bool = False) -> dict[str, str]:
 
 
 def expand_env(value: Any, missing: list[str] | None = None) -> Any:
-    """Recursively expand ${VAR} in string values of the config."""
+    """Recursively expand ${VAR} in string values of the config.
+
+    Vars that are unset OR set-but-empty expand to "" so placeholder keys
+    like a blank ${LLM_API_KEY} never leak through as literal text.
+    """
     if isinstance(value, str):
         def repl(m: re.Match) -> str:
             var = m.group(1)
             v = os.environ.get(var)
             if v is None and missing is not None:
                 missing.append(var)
-            return v or m.group(0)
+            return v or ""
         return _ENV_RE.sub(repl, value)
     if isinstance(value, dict):
         return {k: expand_env(v, missing) for k, v in value.items()}

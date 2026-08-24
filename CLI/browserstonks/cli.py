@@ -157,7 +157,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from .chat import ChatHandler
     tracker = SessionTracker()
     bus = EventBus()
-    harnesses = HarnessManager(cfg.data)
+    harnesses = HarnessManager(cfg.data,
+                               extra_harnesses=registry.harnesses)
     chat = ChatHandler(harnesses, tracker, bus,
                        docs_dir=cfg.root / cfg.get("docsDir", "docs"))
 

@@ -55,6 +55,10 @@ class BaseIntegration:
                 resp.setdefault("events", self.bus.drain())
             return resp
 
+        if mtype == "session.snapshot" and self.tracker is not None:
+            return {"type": "session.snapshot",
+                    "snapshot": self.tracker.snapshot()}
+
         if mtype.startswith("session.") and self.tracker is not None:
             self.tracker.apply_event(msg)
             return {"type": "session.ack", "event": mtype}
@@ -88,8 +92,10 @@ class WebSocketIntegration(BaseIntegration):
     name = "websocket"
 
     def __init__(self, planner: Planner, host: str = "127.0.0.1",
-                 port: int = 8765) -> None:
-        super().__init__(planner)
+                 port: int = 8765, chat_handler=None, tracker=None,
+                 bus=None) -> None:
+        super().__init__(planner, chat_handler=chat_handler,
+                         tracker=tracker, bus=bus)
         self.host = host
         self.port = port
 

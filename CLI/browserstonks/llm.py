@@ -140,10 +140,12 @@ def make_provider(cfg: dict[str, Any]) -> BaseProvider:
             f"unknown LLM provider '{name}'. available: {sorted(PROVIDERS)}"
         )
     key = cfg.get("api_key") or os.environ.get(f"{name.upper()}_API_KEY", "")
-    if name != "offline" and not key:
-        raise LLMError(
-            f"no API key for '{name}': set llm.api_key in config.jsonc "
-            f"or {name.upper()}_API_KEY in .env"
-        )
+    if key.startswith("${") or not key.strip():
+        if name != "offline":
+            raise LLMError(
+                f"no API key for '{name}': set llm.api_key in config.jsonc "
+                f"or {name.upper()}_API_KEY in .env"
+            )
+        key = ""
     opts = {k: v for k, v in cfg.items() if k not in ("provider", "api_key")}
     return cls(api_key=key, **opts)

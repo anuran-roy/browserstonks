@@ -63,7 +63,7 @@ async def get_answer(field: dict[str, Any],
         try:
             answer = provider.complete(ANSWER_SYSTEM_PROMPT, prompt)
             answer = (answer or "").strip()
-        except LLMError:
+        except Exception:  # noqa: BLE001 - any provider failure falls back
             answer = ""
         if answer:
             return answer
