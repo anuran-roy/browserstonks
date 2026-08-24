@@ -20,6 +20,7 @@ inline content in a third arg.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from pathlib import Path
