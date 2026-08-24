@@ -95,9 +95,10 @@ class BaseIntegration:
             return {"type": "session.snapshot",
                     "snapshot": self.tracker.snapshot()}
 
-        if mtype == "ping":
+        elif mtype == "ping":
             return {"type": "pong"}
 
+        # session.ack and other quiet replies don't need echoing/log spam
         return {"error": f"unknown message type '{mtype}'"}
 
     async def handle(self, dom: dict[str, Any]) -> dict[str, Any]:
@@ -147,6 +148,8 @@ class WebSocketIntegration(BaseIntegration):
                         # extension service worker) can match the reply
                         if isinstance(resp, dict):
                             resp.setdefault("sender", msg.get("sender"))
+                            if msg.get("requestId") is not None:
+                                resp.setdefault("requestId", msg.get("requestId"))
                             if "tabId" not in resp and msg.get("tabId") is not None:
                                 resp["tabId"] = msg.get("tabId")
                         await ws.send(json.dumps(resp))

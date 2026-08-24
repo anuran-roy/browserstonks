@@ -83,14 +83,18 @@ function connect() {
     ws.onerror = () => { /* onclose follows */ };
     ws.onmessage = (ev) => {
       let msg;
-      try { msg = JSON.parse(ev.data); } catch {
-        log("unparseable message from CLI:", ev.data?.slice(0, 200));
-        return;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      // verbose per-message logging only for non-chatter types
+      if (!["pong", "session.ack"].includes(msg.type)) {
+        log("message from CLI:", JSON.stringify(msg).slice(0, 300));
       }
-      log("message from CLI:", JSON.stringify(msg).slice(0, 300));
       if (msg.error) {
         log("CLI returned an error:", msg.error);
         badge("ERR", "#dc2626");
+        return;
+      }
+      // quiet chatter: pongs + session acks need no handling or logging
+      if (msg.type === "pong" || msg.type === "session.ack") {
         return;
       }
       if (msg.type === "browser.events") {
@@ -141,8 +145,11 @@ function connect() {
           pageLog(msg.tabId, `[browserstonks] fill failed: ${e.message}`);
         });
       } else {
-        log("message from CLI ignored (missing routing fields):",
-            msg.requestId, msg.sender, msg.tabId, !!msg.program);
+        // only log genuinely unexpected messages, not routing chatter
+        if (!["chat.response", "harnesses.list", "chat.progress",
+              "tab.read.request", "browser.events"].includes(msg.type)) {
+          log("unhandled message from CLI:", msg.type || "(no type)");
+        }
       }
     };
   });

@@ -143,17 +143,33 @@ class ChatHandler:
                            _round + 1,
                            [a["op"] for a in actions
                             if a["op"] in ("tab.read", "tab.process")])
-            # execute read/process actions and collect results
+            # execute actions; read/process results (success AND failure)
+            # go back to the harness so it can adapt (e.g. open the tab
+            # first, then retry the read)
             results_payload = []
+            # if this batch opens tabs, give the browser a moment to
+            # actually open + report them before reads resolve
+            if any(a["op"] in ("tab.new", "tab.open") for a in actions):
+                await asyncio.sleep(2.0)
             applied = await self._apply_actions(actions, message, result,
                                                 results_out=results_payload)
             applied_total.extend(applied)
+            # flush browser events (tab.new etc.) to the browser NOW so
+            # they take effect before the harness's next round — otherwise
+            # tab.new + tab.read in one reply always race
+            if emit is not None and self.bus.events:
+                await _maybe_await(emit({"type": "browser.events",
+                                         "events": self.bus.drain()}))
             if not results_payload:
                 _chat_log.warning("round %d: no read/process results "
                                   "(all failed?) — stopping loop", _round + 1)
+                # prevent the final apply from re-applying these actions
+                result["actions"] = []
                 break
             reply_text = ("ACTION RESULTS (from your tab.read/tab.process "
-                          "actions):\n" + json.dumps(results_payload, indent=2)[:60000])
+                          "actions; failures included — adapt and retry if "
+                          "needed):\n"
+                          + json.dumps(results_payload, indent=2)[:60000])
         else:
             _chat_log.warning("read/process loop hit round limit")
             result = {"reply": "⚠️ too many read/process rounds", "actions": []}
@@ -215,18 +231,26 @@ class ChatHandler:
                     entry = await self._tab_read(args)
                     applied.append({"op": op, "ok": entry.get("ok", False),
                                     "error": entry.get("error")})
-                    if results_out is not None and entry.get("ok"):
-                        results_out.append({"action": "tab.read",
-                                            "tab": entry["tab"],
-                                            "html": entry["html"]})
+                    if results_out is not None:
+                        # success -> HTML; failure -> error the harness can
+                        # act on (open the tab first, then retry)
+                        results_out.append({
+                            "action": "tab.read",
+                            "tab": entry.get("tab", args[0] if args else "?"),
+                            "html": entry.get("html"),
+                            "error": entry.get("error"),
+                        })
                 elif op == "tab.process":
                     entry = await self._tab_process(args, result)
                     applied.append({"op": op, "ok": entry.get("ok", False),
                                     "error": entry.get("error")})
-                    if results_out is not None and entry.get("ok"):
-                        results_out.append({"action": "tab.process",
-                                            "tab": entry["tab"],
-                                            "result": entry["result"]})
+                    if results_out is not None:
+                        results_out.append({
+                            "action": "tab.process",
+                            "tab": entry.get("tab", args[0] if args else "?"),
+                            "result": entry.get("result"),
+                            "error": entry.get("error"),
+                        })
                 elif op == "doc.create":
                     fmt = args[0] if len(args) > 0 else "markdown"
                     filename = args[1] if len(args) > 1 else "doc.md"
