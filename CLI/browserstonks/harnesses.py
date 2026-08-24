@@ -243,7 +243,11 @@ class OpenCodeHarness(BaseHarness):
 
     # ------------------------------------------------------------ SSE support
     def _ensure_sse(self) -> bool:
-        """Start the /event SSE listener thread (server mode only)."""
+        """Start the /event SSE listener thread (server mode only).
+
+        The same listener auto-replies to tool permission requests when
+        `autoApproveTools` is enabled (default: once per tool call).
+        """
         if self.mode != "server":
             return False
         if self._sse_thread and self._sse_thread.is_alive():
@@ -266,6 +270,7 @@ class OpenCodeHarness(BaseHarness):
                                 ev = json.loads(line[5:].strip())
                             except ValueError:
                                 continue
+                            self._maybe_auto_approve(ev)
                             self._dispatch_sse(ev)
                 except Exception as e:  # noqa: BLE001 - reconnect
                     _h_log.warning("opencode SSE disconnected (%s); "
@@ -277,6 +282,33 @@ class OpenCodeHarness(BaseHarness):
         self._sse_thread.start()
         _h_log.info("opencode SSE event stream connected")
         return True
+
+    def _maybe_auto_approve(self, ev: dict) -> None:
+        """Auto-reply to permission requests so unattended turns don't hang.
+
+        Enabled by default (autoApproveTools: true) — reply "once" so each
+        tool call runs but nothing is permanently allowed. Set
+        autoApproveTools: "always" to allow every future call of a tool,
+        or false to disable (turns will hang on permission prompts).
+        """
+        mode = self.config.get("autoApproveTools", True)
+        if not mode:
+            return
+        etype = ev.get("type", "")
+        if etype not in ("permission.asked", "permission.v2.asked"):
+            return
+        props = ev.get("properties", {}) or {}
+        rid = props.get("id")
+        if not rid:
+            return
+        reply = "always" if mode == "always" else "once"
+        tool = props.get("permission") or props.get("action") or "?"
+        try:
+            self._http("POST", f"/permission/{rid}/reply",
+                       {"reply": reply}, timeout=15)
+            _h_log.info("auto-approved %s tool call (%s)", tool, reply)
+        except HarnessError as e:
+            _h_log.warning("auto-approve failed for %s: %s", rid, e)
 
     def _dispatch_sse(self, ev: dict) -> None:
         import queue as _q
@@ -374,7 +406,7 @@ class OpenCodeHarness(BaseHarness):
                                 "SSE" if queue is not None else "polling")
                     return {"reply": reply, "actions": _extract_actions(reply),
                             "meta": {"mode": "server", "session": oc_session,
-                                     "reasoning": reasoning[:2000]}}
+                                     "reasoning": (reasoning or "")[:2000]}}
             raise HarnessError(
                 f"opencode turn did not finish within "
                 f"{self.config.get('turnTimeout', 600)}s")

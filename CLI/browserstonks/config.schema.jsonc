@@ -76,6 +76,13 @@
           "workdir": { "type": "string" },
           "base_url": { "type": "string", "description": "Server mode HTTP endpoint" },
           "agent": { "type": "string", "description": "opencode: agent id (build/plan/...)" },
+          "turnTimeout": { "type": "integer", "description": "opencode server: max seconds per agent turn (default 600)" },
+          "pollInterval": { "type": "number", "description": "opencode server: poll fallback / SSE idle interval seconds (default 1.0)" },
+          "autoApproveTools": {
+            "type": ["boolean", "string"],
+            "enum": [true, false, "always"],
+            "description": "opencode server: auto-reply to tool permission prompts. true (default) = approve once per call; 'always' = permanently allow each tool; false = turns hang on prompts"
+          },
           "model": {
             "type": "object",
             "description": "opencode: {providerID, modelID} override",
