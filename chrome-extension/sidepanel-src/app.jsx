@@ -79,8 +79,10 @@ function App() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [harnesses, setHarnesses] = useState([]);
-  const [harness, setHarness] = useState("opencode");
-  const [sessionId, setSessionId] = useState(() => "sp-" + Date.now().toString(36));
+  const [harness, setHarness] = useState(
+    () => localStorage.getItem("bs:activeHarness") || "opencode");
+  const [sessionId, setSessionId] = useState(
+    () => localStorage.getItem("bs:activeSession") || ("sp-" + Date.now().toString(36)));
   const [savedSessions, setSavedSessions] = useState([]);
   const [connected, setConnected] = useState(false);
   const [progress, setProgress] = useState(null); // {text, reasoning, ts}
@@ -89,6 +91,37 @@ function App() {
   const [, forceTick] = useState(0);
   const listRef = useRef(null);
   const progressRef = useRef({ text: "", reasoning: "" });
+
+  // persist the active session/harness so reopening the panel resumes it
+  useEffect(() => {
+    localStorage.setItem("bs:activeSession", sessionId);
+  }, [sessionId]);
+  useEffect(() => {
+    localStorage.setItem("bs:activeHarness", harness);
+  }, [harness]);
+
+  // on mount: if there's a persisted session with a saved transcript, load it
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const saved = localStorage.getItem("bs:activeSession");
+    if (!saved) return;
+    (async () => {
+      const data = await chrome.runtime.sendMessage(
+        { type: "SESSION_LOAD", sessionId: saved }).catch(() => null);
+      if (data?.session?.messages?.length) {
+        setSessionId(data.session.id);
+        if (data.session.harness) setHarness(data.session.harness);
+        setMessages(data.session.messages.map((m) => ({
+          role: m.role === "assistant" ? "assistant" : m.role,
+          content: m.content,
+          actions: m.actions || [],
+          reasoning: m.reasoning || "",
+        })));
+      }
+    })();
+  }, []);
 
   // live model thinking/streamed text pushed from the background worker
   useEffect(() => {
@@ -185,6 +218,12 @@ function App() {
     ev.stopPropagation(); ev.preventDefault();
     await chrome.runtime.sendMessage(
       { type: "SESSION_DELETE", sessionId: sid }).catch(() => null);
+    // if the deleted session was the persisted active one, start fresh
+    if (localStorage.getItem("bs:activeSession") === sid) {
+      localStorage.removeItem("bs:activeSession");
+      setSessionId("sp-" + Date.now().toString(36));
+      setMessages([]);
+    }
     refresh();
   }
 
