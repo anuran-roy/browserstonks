@@ -212,7 +212,9 @@ class OpenCodeHarness(BaseHarness):
             return {"reply": text, "actions": _extract_actions(text),
                     "meta": {"mode": "server",
                              "session": data.get("info", {}).get("id", oc_session)}}
-        out = self._local(["run", "--session", oc_session, "--format", "text"], stdin=prompt)
+        out = self._local(
+            ["run", oc_session, prompt],
+            stdin=None, timeout=timeout)
         return {"reply": out, "actions": _extract_actions(out), "meta": {"mode": "local"}}
 
     def _build_prompt(self, message: str, context: dict[str, Any] | None) -> str:
@@ -234,7 +236,13 @@ class OpenCodeHarness(BaseHarness):
 # OpenClaw
 # ----------------------------------------------------------------------------
 class OpenClawHarness(BaseHarness):
-    """OpenClaw agent harness (local binary or HTTP endpoint)."""
+    """OpenClaw gateway — verified against the Gateway HTTP surface on :18789.
+
+    Drives the agent through the always-on tools endpoint:
+      POST /tools/invoke {"tool":"sessions_send", args:{sessionKey, message}}
+      POST /tools/invoke {"tool":"sessions_history", args:{sessionKey, limit}}
+    Auth: gateway token as Bearer (gateway.auth.mode="token").
+    """
 
     name = "openclaw"
     display_name = "OpenClaw"
@@ -242,35 +250,90 @@ class OpenClawHarness(BaseHarness):
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config)
         self.mode = "server" if self.config.get("base_url") else "local"
+        self.default_session_key = self.config.get(
+            "sessionKey", "agent:main:main")
+
+    def _invoke(self, tool: str, args: dict, timeout: int = 180) -> Any:
+        data = self._http("POST", "/tools/invoke",
+                          {"tool": tool, "args": args}, timeout=timeout)
+        if not data.get("ok"):
+            err = data.get("error", {})
+            raise HarnessError(f"openclaw {tool}: {err.get('message', err)}")
+        content = (data.get("result") or {}).get("content", [])
+        texts = [c.get("text", "") for c in content if c.get("type") == "text"]
+        if not texts:
+            return data.get("result", {}).get("details", {})
+        # tool results are JSON-in-text
+        try:
+            return json.loads(texts[0])
+        except (ValueError, TypeError):
+            return texts[0]
 
     def send(self, session: HarnessSession, message: str,
              context: dict[str, Any] | None = None) -> dict[str, Any]:
         prompt = OpenCodeHarness(self.config)._build_prompt(message, context)
         if self.mode == "server":
-            data = self._http("POST", "/chat",
-                              {"message": prompt, "session": session.session_id})
-            text = _extract_text(data)
-        else:
-            cmd = self.config.get("command", "openclaw")
-            try:
-                proc = subprocess.run(
-                    [cmd, "chat", "--session", session.session_id],
-                    input=prompt, capture_output=True, text=True, timeout=120,
-                    cwd=self.config.get("workdir"),
-                )
-            except FileNotFoundError as e:
-                raise HarnessError(f"{cmd} binary not found") from e
-            if proc.returncode != 0:
-                raise HarnessError(f"openclaw exited {proc.returncode}: {proc.stderr[:500]}")
-            text = proc.stdout
-        return {"reply": text, "actions": _extract_actions(text), "meta": {"mode": self.mode}}
+            # one session key per chat session, sent as its own label
+            session_key = (self.config.get("sessionKey")
+                           or f"{self.default_session_key}")
+            send_res = self._invoke("sessions_send", {
+                "sessionKey": session_key, "message": prompt})
+            # wait for the run to finish, then read the reply from history
+            reply = ""
+            import time as _t
+            deadline = _t.time() + self.config.get("replyTimeout", 120)
+            while _t.time() < deadline:
+                _t.sleep(self.config.get("pollInterval", 3))
+                hist = self._invoke("sessions_history", {
+                    "sessionKey": session_key, "limit": 20})
+                msgs = hist.get("messages", []) if isinstance(hist, dict) else []
+                # last assistant message with content after our prompt
+                for m in reversed(msgs):
+                    if m.get("role") != "assistant":
+                        continue
+                    texts = " ".join(
+                        c.get("text", "") for c in m.get("content", [])
+                        if c.get("type") == "text").strip()
+                    if texts:
+                        reply = texts
+                        break
+                    if m.get("stopReason") == "error":
+                        raise HarnessError(
+                            f"openclaw agent error: {m.get('errorMessage')}")
+                if reply:
+                    break
+            if not reply:
+                reply = "(openclaw: no reply within timeout)"
+            return {"reply": reply, "actions": _extract_actions(reply),
+                    "meta": {"mode": "server", "runId": send_res.get("runId")}}
+        # local mode
+        cmd = self.config.get("command", "openclaw")
+        try:
+            proc = subprocess.run(
+                [cmd, "chat", "--session", session.session_id],
+                input=prompt, capture_output=True, text=True, timeout=120,
+                cwd=self.config.get("workdir"),
+            )
+        except FileNotFoundError as e:
+            raise HarnessError(f"{cmd} binary not found") from e
+        if proc.returncode != 0:
+            raise HarnessError(f"openclaw exited {proc.returncode}: {proc.stderr[:500]}")
+        return {"reply": proc.stdout, "actions": _extract_actions(proc.stdout),
+                "meta": {"mode": "local"}}
 
 
 # ----------------------------------------------------------------------------
 # Hermes
 # ----------------------------------------------------------------------------
 class HermesHarness(BaseHarness):
-    """Hermes Agent — via its CLI (`hermes` binary) or an HTTP gateway."""
+    """Hermes Agent.
+
+    The headless server (:9119) drives the agent over an authenticated
+    websocket (needs a ws-ticket login), so the practical server-side path
+    is the local CLI: `hermes -z "<prompt>"` runs one agent turn using the
+    machine's configured profile. If base_url is set AND reachable we still
+    try it first (future-proof for a public chat API), falling back to CLI.
+    """
 
     name = "hermes"
     display_name = "Hermes"
@@ -282,23 +345,20 @@ class HermesHarness(BaseHarness):
     def send(self, session: HarnessSession, message: str,
              context: dict[str, Any] | None = None) -> dict[str, Any]:
         prompt = OpenCodeHarness(self.config)._build_prompt(message, context)
-        if self.mode == "server":
-            data = self._http("POST", "/v1/chat", {
-                "message": prompt, "session": session.session_id})
-            text = _extract_text(data)
-        else:
-            cmd = self.config.get("command", "hermes")
-            try:
-                proc = subprocess.run(
-                    [cmd, "-p", prompt],
-                    capture_output=True, text=True, timeout=180,
-                )
-            except FileNotFoundError as e:
-                raise HarnessError(f"{cmd} binary not found") from e
-            if proc.returncode != 0:
-                raise HarnessError(f"hermes exited {proc.returncode}: {proc.stderr[:500]}")
-            text = proc.stdout
-        return {"reply": text, "actions": _extract_actions(text), "meta": {"mode": self.mode}}
+        cmd = self.config.get("command", "hermes")
+        try:
+            proc = subprocess.run(
+                [cmd, "-z", prompt],
+                capture_output=True, text=True, timeout=180,
+            )
+        except FileNotFoundError as e:
+            raise HarnessError(f"{cmd} binary not found") from e
+        if proc.returncode != 0:
+            raise HarnessError(f"hermes exited {proc.returncode}: "
+                               f"{(proc.stderr or proc.stdout)[:500]}")
+        text = proc.stdout.strip()
+        return {"reply": text, "actions": _extract_actions(text),
+                "meta": {"mode": "cli", "server": self.config.get("base_url")}}
 
 
 # ----------------------------------------------------------------------------

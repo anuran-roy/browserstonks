@@ -19,6 +19,19 @@
     "typeform": true
   },
   "answersFile": "answers.jsonc",
+  "docsDir": "docs",
+  "harnesses": {
+    "opencode": {
+      "base_url": "http://127.0.0.1:4096"
+    },
+    "openclaw": {
+      "base_url": "http://127.0.0.1:18789",
+      "auth": { "type": "bearer", "token": "${OPENCLAW_GATEWAY_TOKEN}" }
+    },
+    "hermes": {
+      "base_url": "http://127.0.0.1:9119"
+    }
+  },
   "mcpServers": {
     // "example": {
     //   "command": "npx", "args": ["-y", "@example/mcp-server"],
