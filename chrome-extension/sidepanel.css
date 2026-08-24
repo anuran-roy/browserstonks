@@ -28,6 +28,12 @@ header select { background: var(--bg); color: var(--text); border: 1px solid var
 .bubble.error { border-color: var(--bad); }
 .bubble.thinking { color: var(--muted); font-style: italic; }
 
+/* system messages (connection state etc.) — full-width, subtle */
+.bubble.system { align-self: center; background: transparent;
+  border: 1px dashed var(--border); color: var(--muted);
+  font-size: 11px; padding: 4px 12px; border-radius: 999px; }
+.system-text { text-align: center; }
+
 /* live progress during long model turns */
 .bubble.live { border-style: dashed; }
 .thinking-stream { margin-bottom: 6px; }

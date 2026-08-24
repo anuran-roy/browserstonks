@@ -53,6 +53,12 @@ async function pageLog(tabId, message) {
   } catch { /* content script may be gone; ignore */ }
 }
 
+// tell the sidepanel (and any listeners) when the CLI connection changes
+function broadcastConnState(connected) {
+  chrome.runtime.sendMessage({ type: "CONNECTION_STATE", connected })
+    .catch(() => { /* sidepanel closed; ignore */ });
+}
+
 // ---------------------------------------------------------------- websocket
 function connect() {
   return CLI_WS_URL().then((url) => {
@@ -64,6 +70,7 @@ function connect() {
     ws.onopen = () => {
       log("connected to CLI");
       startKeepalive();
+      broadcastConnState(true);
       while (pending.length) {
         const m = pending.shift();
         try {
@@ -79,6 +86,7 @@ function connect() {
     ws.onclose = () => {
       log("CLI disconnected; will retry on next action");
       ws = null;
+      broadcastConnState(false);
     };
     ws.onerror = () => { /* onclose follows */ };
     ws.onmessage = (ev) => {

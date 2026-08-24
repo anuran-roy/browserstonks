@@ -28,6 +28,19 @@ function App() {
         setProgress({ text: buf.text, reasoning: buf.reasoning,
                       ts: Date.now() });
       }
+      if (msg.type === "CONNECTION_STATE") {
+        setConnected(!!msg.connected);
+        // system message below the chat when the CLI link breaks
+        if (msg.connected === false) {
+          setMessages((m) => [...m, {
+            role: "system", content: "⚠️ Connection to CLI lost — waiting to reconnect…",
+          }]);
+        } else if (msg.connected === true) {
+          setMessages((m) => [...m, {
+            role: "system", content: "✓ Reconnected to CLI",
+          }]);
+        }
+      }
       // ack so the channel doesn't complain
       if (sendResponse) sendResponse({ ok: true });
     };
@@ -107,6 +120,7 @@ function App() {
         )}
         {messages.map((m, i) => (
           <div key={i} className={"bubble " + m.role + (m.error ? " error" : "")}>
+            {m.role === "system" && <div className="system-text">{m.content}</div>}
             {m.reasoning && <details className="reasoning">
               <summary>💭 thinking</summary>
               <div className="reasoning-body">{m.reasoning}</div>
