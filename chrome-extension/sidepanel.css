@@ -74,6 +74,15 @@ details.reasoning summary { color: var(--muted); cursor: pointer; }
 .bubble.assistant a { color: #93c5fd; }
 
 .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+
+/* message footer: copy button, subtle until hovered */
+.msg-footer { display: flex; justify-content: flex-end; margin-top: 4px; }
+.copy-btn { background: transparent; border: 0; border-radius: 5px;
+  color: var(--muted); font-size: 12px; line-height: 1; padding: 3px 5px;
+  cursor: pointer; opacity: 0; transition: opacity .12s, color .12s; }
+.bubble:hover .copy-btn { opacity: 0.7; }
+.copy-btn:hover { opacity: 1 !important; color: var(--text); }
+.copy-btn.copied, .copy-btn:active { color: var(--ok); }
 .chip-wrap { position: relative; display: inline-flex; }
 .chip { font-size: 11px; padding: 2px 8px; border-radius: 999px;
   border: 1px solid var(--border); background: var(--panel); color: var(--muted);

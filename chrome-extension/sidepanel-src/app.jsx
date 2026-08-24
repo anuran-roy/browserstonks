@@ -6,6 +6,34 @@ import { Streamdown } from "streamdown";
 
 const HARNESS_ORDER = ["opencode", "openclaw", "hermes"];
 
+// copy button on a message bubble: clipboard write + temporary tick
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  async function copy(ev) {
+    ev.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // clipboard API can fail without focus; fall back to a temp textarea
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+  return (
+    <button className="copy-btn" onClick={copy} title="Copy message">
+      {copied ? "✓" : "⧉"}
+    </button>
+  );
+}
+
 // one action badge: hover -> rich link preview (title, OG description,
 // site name, favicon); click -> focus the exact tab this action opened
 function ActionChip({ a, eventTabs }) {
@@ -341,6 +369,11 @@ function App() {
                 {m.actions.map((a, j) => (
                   <ActionChip key={j} a={a} eventTabs={eventTabsRef.current} />
                 ))}
+              </div>
+            )}
+            {m.role !== "system" && (
+              <div className="msg-footer">
+                <CopyButton text={m.content} />
               </div>
             )}
           </div>
