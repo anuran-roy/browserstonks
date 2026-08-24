@@ -275,39 +275,64 @@
     clamp();
     window.addEventListener("resize", clamp);
 
-    // drag along the right edge; a tiny move (< 5px) counts as a click
-    let dragging = false, moved = false, startY = 0, startTop = 0;
+    // click = plain pointer press (fires on pointerdown, while the user
+    // gesture is freshest — sidePanel.open needs it). drag = two-finger
+    // touch OR shift+drag with the mouse.
+    const activePointers = new Set();
+    let dragging = false, startY = 0, startTop = 0;
+
+    function openPanel() {
+      chrome.runtime.sendMessage({ type: "OPEN_CHAT_PANEL" })
+        .then((r) => {
+          if (r && r.ok === false) {
+            log("panel open failed:", r.error, "(fallback: popup window)");
+          }
+        })
+        .catch((e) => log("panel open failed (extension context?):", e));
+    }
+
     btn.addEventListener("pointerdown", (e) => {
-      dragging = true; moved = false;
-      startY = e.clientY;
-      startTop = parseFloat(btn.style.top) || (window.innerHeight * 0.4);
-      btn.setPointerCapture(e.pointerId);
-      btn.classList.add("dragging");
-      e.preventDefault();
+      activePointers.add(e.pointerId);
+      const twoFinger = activePointers.size >= 2;
+      if (twoFinger || e.shiftKey) {
+        // DRAG mode begins: capture this pointer and start moving
+        dragging = true;
+        startY = e.clientY;
+        startTop = parseFloat(btn.style.top) || (window.innerHeight * 0.4);
+        btn.setPointerCapture(e.pointerId);
+        btn.classList.add("dragging");
+        e.preventDefault();
+      } else if (activePointers.size === 1 && !dragging) {
+        // plain single click with no modifier: open the panel NOW
+        // (pointerdown keeps the user gesture alive for the background)
+        openPanel();
+      }
     });
     btn.addEventListener("pointermove", (e) => {
       if (!dragging) return;
       const dy = e.clientY - startY;
-      if (Math.abs(dy) > 5) moved = true;
       const max = window.innerHeight - btn.offsetHeight - 8;
       btn.style.top = Math.max(8, Math.min(startTop + dy, max)) + "px";
     });
-    btn.addEventListener("pointerup", (e) => {
+    function endDrag(e) {
+      activePointers.delete(e.pointerId);
       if (!dragging) return;
-      dragging = false;
-      btn.classList.remove("dragging");
-      if (moved) {
+      if (activePointers.size === 0) {
+        dragging = false;
+        btn.classList.remove("dragging");
         // persist position
         try {
           localStorage.setItem(key, btn.style.top);
           sessionStorage.setItem(key, btn.style.top);
         } catch { /* ignore */ }
-      } else {
-        // click: open the sidepanel via the background worker
-        chrome.runtime.sendMessage({ type: "OPEN_CHAT_PANEL" })
-          .catch(() => log("panel open failed (extension context?)"));
       }
-    });
+    }
+    btn.addEventListener("pointerup", endDrag);
+    btn.addEventListener("pointercancel", endDrag);
+
+    // track a second finger landing anywhere on the button (touches arrive
+    // as separate pointerdown events — already handled above); when the
+    // FIRST (non-drag) pointer lifts while a second is held, do nothing.
 
     document.documentElement.appendChild(host);
     log("panel button mounted (right edge)");

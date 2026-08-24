@@ -460,21 +460,31 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return;
   }
   if (msg.type === "OPEN_CHAT_PANEL") {
-    // floating edge button on a page: open the sidepanel for its tab.
-    // MUST be called synchronously here — chrome.sidePanel.open requires
-    // an active user gesture, and awaiting anything first breaks it.
+    // floating edge button: open the sidepanel for its tab. Called
+    // synchronously (sidePanel.open wants an active user gesture); if
+    // the gesture was lost crossing the content->background boundary,
+    // fall back to a popup window which needs no gesture.
     try {
       const tabId = sender?.tab?.id;
+      const open = (id) => chrome.sidePanel.open({ tabId: id }).then(
+        () => sendResponse({ ok: true }),
+        (e) => {
+          log("sidePanel.open failed:", e.message, "— opening popup fallback");
+          // fallback: an always-on-top popup window with the panel UI
+          chrome.windows.create({
+            url: "sidepanel.html?popup=1",
+            type: "popup",
+            width: 420, height: 640,
+            focused: true,
+          }).then(
+            () => sendResponse({ ok: true, fallback: "popup" }),
+            (e2) => sendResponse({ ok: false, error: e2.message }));
+        });
       if (tabId != null) {
-        chrome.sidePanel.open({ tabId }).then(
-          () => sendResponse({ ok: true }),
-          (e) => sendResponse({ ok: false, error: e.message }));
+        open(tabId);
       } else {
-        // no tab context (e.g. popup) — fall back to the active tab
         chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) =>
-          chrome.sidePanel.open({ tabId: tab.id }).then(
-            () => sendResponse({ ok: true }),
-            (e) => sendResponse({ ok: false, error: e.message })));
+          open(tab.id));
       }
     } catch (e) {
       sendResponse({ ok: false, error: e.message });
