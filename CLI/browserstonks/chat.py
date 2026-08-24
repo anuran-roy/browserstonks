@@ -257,10 +257,11 @@ class ChatHandler:
                     filename = args[1] if len(args) > 1 else "doc.md"
                     content = self._doc_content(fmt, filename, result, original_message)
                     path = self._write_doc(filename, content)
-                    ev = self.bus.doc_open(f"file://{path}")
+                    ev = self.bus.doc_open(
+                        f"file://{path.resolve()}")
                     _act_log.info("doc.create %s (%s, %d chars) -> %s",
                                   filename, fmt, len(content), path)
-                    applied.append({"op": "doc.create", "file": str(path),
+                    applied.append({"op": "doc.create", "file": str(path.resolve()),
                                     "format": fmt, "ok": True, "chars": len(content)})
                 else:
                     _act_log.warning("unknown action op '%s' (args=%s)", op, args)

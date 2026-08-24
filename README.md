@@ -76,12 +76,26 @@ The event bus records browser events when no browser is attached, so the same ac
 
 ## Quick start
 
+One-command setup — installs the CLI, the agent harnesses (OpenCode,
+OpenClaw, Hermes), builds the extension sidepanel, auto-configures
+`config.jsonc` (detecting running servers and reading the OpenClaw
+token from `~/.openclaw`), validates with `doctor`, and starts serving:
+
+```
+cd CLI
+./setup.sh                    # install + configure + start
+./setup.sh --no-start         # install + configure only
+./setup.sh --skip-harnesses   # CLI + extension only
+```
+
+Manual alternative:
+
 ```
 cd CLI
 pip install -e .
-browserstonks init          # config.jsonc, config.schema.jsonc, .env, answers.jsonc
+browserstonks init            # config.jsonc, config.schema.jsonc, .env, answers.jsonc
 # put LLM_API_KEY in .env; configure harnesses in config.jsonc
-./start.sh                  # or ./start.sh --daemon
+./start.sh                    # or ./start.sh --daemon
 ```
 
 Load `chrome-extension/` as an unpacked extension (`chrome://extensions` → Developer mode → Load unpacked), open any form, click **Fill this form**, or open the sidepanel and chat with a harness.
@@ -138,6 +152,7 @@ CLI/                     Python CLI
     llm.py               provider clients
     mcp.py               MCP server support
   plugins/               drop-in plugin directory
+  setup.sh               one-command install: CLI + harnesses + extension build
   start.sh / stop.sh     server lifecycle scripts
 ```
 

@@ -33,14 +33,28 @@ the browser to this CLI, which provides:
 
 ## Quick start
 
+One-command setup (installs CLI + harnesses, builds the sidepanel,
+auto-configures, validates, optionally starts):
+
+    ./setup.sh                    # everything
+    ./setup.sh --no-start         # don't start the server
+    ./setup.sh --skip-harnesses   # skip OpenCode/OpenClaw/Hermes installs
+
+`setup.sh` auto-detects a running OpenCode server (`:4096`), reads the
+OpenClaw gateway token from `~/.openclaw/openclaw.json`, and wires the
+Hermes CLI — dropping the right entries into `config.jsonc`. Existing
+config files are never overwritten (a `.jsonc.bak` backup is kept).
+
+Manual alternative:
+
     pip install -e .
     browserstonks init          # writes config.jsonc, config.schema.jsonc, .env
     browserstonks serve         # start all enabled integrations (default: ws on 8765)
     browserstonks doctor        # validate config, env keys, MCP servers
 
-Or use the scripts: `./start.sh` (foreground), `./start.sh --daemon`
-(logs to serve.log), `./stop.sh`. Set `BS_VERBOSE=1` or `BS_DEBUG=1`
-before start.sh to control log detail.
+Server lifecycle: `./start.sh` (foreground), `./start.sh --daemon`
+(logs to serve.log), `./stop.sh`. Log detail with `BS_VERBOSE=1` /
+`BS_DEBUG=1` or `--verbose` / `--debug`.
 
 ## Logging
 

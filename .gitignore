@@ -7,3 +7,4 @@ serve.pid
 **/node_modules# chat-created documents (doc.create output)
 CLI/docs/
 node_modules/
+config.jsonc.bak

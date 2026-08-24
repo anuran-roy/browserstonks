@@ -1,19 +1,22 @@
-// BrowserStonks configuration (JSON with comments).
-// String values support ${VAR} expansion from the environment / .env file.
+// BrowserStonks configuration (auto-configured by setup.sh; edit freely).
+// Schema: config.schema.jsonc · values support ${VAR} expansion from .env
 {
   "llm": {
-    // provider: "openrouter" | "openai" | "anthropic" | "offline"
     "provider": "${LLM_PROVIDER}",
     "model": "${LLM_MODEL}",
-    // api key: prefer .env and reference it here
     "api_key": "${LLM_API_KEY}"
   },
   "integrations": {
-    "websocket": { "enabled": true, "host": "127.0.0.1", "port": 8765 },
-    "stdio": { "enabled": false }
+    "websocket": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 8765
+    },
+    "stdio": {
+      "enabled": false
+    }
   },
   "formAdapters": {
-    // plug-n-play site adapters; disable to skip a built-in
     "generic": true,
     "google_forms": true,
     "typeform": true
@@ -26,16 +29,14 @@
     },
     "openclaw": {
       "base_url": "http://127.0.0.1:18789",
-      "auth": { "type": "bearer", "token": "${OPENCLAW_GATEWAY_TOKEN}" }
+      "auth": {
+        "type": "bearer",
+        "token": "29055f88051287c3fc437f2f386bf468043ff0baf3495b7c"
+      }
     },
     "hermes": {
       "base_url": "http://127.0.0.1:9119"
     }
   },
-  "mcpServers": {
-    // "example": {
-    //   "command": "npx", "args": ["-y", "@example/mcp-server"],
-    //   "env": {}, "enabled": true
-    // }
-  }
+  "mcpServers": {}
 }

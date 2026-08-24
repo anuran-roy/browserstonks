@@ -1,7 +1,7 @@
 Metadata-Version: 2.4
 Name: browserstonks
 Version: 0.1.0
-Summary: BrowserStonks: LLM-powered form-filling automation CLI with a dynamic plugin system
+Summary: BrowserStonks: turn any Chromium-based browser into an agentic browser — form filling, session tracking, and agent-harness chat via a pluggable CLI
 Requires-Python: >=3.10
 Requires-Dist: json5>=0.9.25
 Requires-Dist: requests>=2.31
