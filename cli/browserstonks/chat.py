@@ -320,8 +320,14 @@ class ChatHandler:
                                         "error": "no tab id and no active tab"})
                 elif op == "tab.read":
                     entry = await self._tab_read(args)
-                    applied.append({"op": op, "ok": entry.get("ok", False),
-                                    "error": entry.get("error")})
+                    applied.append({"op": op,
+                                    "url": entry.get("url")
+                                       or entry.get("tab")
+                                       or (args[0] if args else ""),
+                                    "tabId": entry.get("tab_id"),
+                                    "ok": entry.get("ok", False),
+                                    "error": entry.get("error"),
+                                    "chars": len(entry.get("html") or "")})
                     if results_out is not None:
                         # success -> HTML; failure -> error the harness can
                         # act on (open the tab first, then retry)
@@ -333,7 +339,12 @@ class ChatHandler:
                         })
                 elif op == "tab.process":
                     entry = await self._tab_process(args, result)
-                    applied.append({"op": op, "ok": entry.get("ok", False),
+                    applied.append({"op": op,
+                                    "url": entry.get("url")
+                                       or entry.get("tab")
+                                       or (args[0] if args else ""),
+                                    "tabId": entry.get("tab_id"),
+                                    "ok": entry.get("ok", False),
                                     "error": entry.get("error")})
                     if results_out is not None:
                         results_out.append({
@@ -382,33 +393,45 @@ class ChatHandler:
 
     async def _tab_read(self, args: list[str]) -> dict[str, Any]:
         """Fetch a tab's HTML via the integration (extension reads the DOM)."""
-        target = self._resolve_tab(args[0] if args else "")
+        raw_arg = args[0] if args else ""
+        target = self._resolve_tab(raw_arg)
         if "error" in target:
             _act_log.warning("tab.read resolve failed: %s", target["error"])
-            return target
+            return {"error": target["error"],
+                    # still surface what was attempted so UI badges can
+                    # preview it (raw arg is often a URL substring)
+                    "url": raw_arg if "://" in raw_arg else "",
+                    "tab": raw_arg}
         reader = getattr(self, "tab_reader", None)
         if reader is None:
             _act_log.warning("tab.read: no tab_reader wired (integration "
                              "cannot read tabs)")
-            return {"error": "this integration cannot read tabs"}
+            return {"error": "this integration cannot read tabs",
+                    "url": target["url"], "tab_id": target["tab_id"]}
         try:
             _act_log.info("tab.read tab %s (%s)…", target["tab_id"], target["url"])
             html = await _maybe_await(reader(target["tab_id"]))
         except Exception as e:  # noqa: BLE001
             _act_log.warning("tab.read failed for tab %s: %s", target["tab_id"], e)
-            return {"error": f"tab read failed: {e}", "tab": target["url"]}
+            return {"error": f"tab read failed: {e}",
+                    "url": target["url"], "tab_id": target["tab_id"],
+                    "tab": target["url"]}
         # keep payloads sane for the harness context window
         html = (html or "")[:100_000]
         _act_log.info("tab.read ok: %d chars from %s", len(html), target["url"])
-        return {"ok": True, "tab": target["url"], "html": html}
+        return {"ok": True, "url": target["url"], "tab_id": target["tab_id"],
+                "tab": target["url"], "html": html}
 
     async def _tab_process(self, args: list[str],
                            result: dict[str, Any] | None) -> dict[str, Any]:
         """Run harness-written process(HTML) code against a tab's HTML."""
-        target = self._resolve_tab(args[0] if args else "")
+        raw_arg = args[0] if args else ""
+        target = self._resolve_tab(raw_arg)
         if "error" in target:
             _act_log.warning("tab.process resolve failed: %s", target["error"])
-            return target
+            return {"error": target["error"],
+                    "url": raw_arg if "://" in raw_arg else "",
+                    "tab": raw_arg}
         code = self._fenced_code(result or {}, "python")
         if not code or "def process" not in code:
             _act_log.warning("tab.process: missing ```python process(HTML) block")
@@ -426,7 +449,8 @@ class ChatHandler:
             _act_log.warning("tab.process failed for tab %s: %s", target["tab_id"], e)
             return {"error": f"tab process failed: {e}", "tab": target["url"]}
         _act_log.info("tab.process ok: %s", json.dumps(outcome)[:200])
-        return {"ok": True, "tab": target["url"], "result": outcome}
+        return {"ok": True, "url": target["url"], "tab_id": target["tab_id"],
+                "tab": target["url"], "result": outcome}
 
     @staticmethod
     def _fenced_code(result: dict, lang: str) -> str:

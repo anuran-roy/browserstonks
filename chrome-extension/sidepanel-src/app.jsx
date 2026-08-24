@@ -11,7 +11,11 @@ const HARNESS_ORDER = ["opencode", "openclaw", "hermes"];
 function ActionChip({ a, eventTabs }) {
   const [meta, setMeta] = useState(null);
   const [hover, setHover] = useState(false);
-  const url = a.url || a.file || a.tab || "";
+  const rawUrl = a.url || a.file || a.tab || "";
+  // normalize: bare domains like "marquee-equity.com" become full URLs
+  const url = /^https?:\/\//.test(rawUrl) ? rawUrl
+    : (/^[\w.-]+\.[a-z]{2,}([\/?#].*)?$/i.test(rawUrl)
+        ? "https://" + rawUrl : rawUrl);
   const isWeb = /^https?:\/\//.test(url);
 
   useEffect(() => {
@@ -42,7 +46,7 @@ function ActionChip({ a, eventTabs }) {
       <button className={"chip " + (a.ok ? "ok" : "bad")} onClick={focusTab}
               onMouseEnter={() => setHover(true)}
               onMouseLeave={() => setHover(false)}
-              title={url || a.op}>
+              title={(a.error ? `✕ ${a.error}\n` : "") + (url || a.op)}>
         {a.op}{a.ok === false ? " ✕" : " ✓"}
       </button>
       {hover && isWeb && (
@@ -57,9 +61,11 @@ function ActionChip({ a, eventTabs }) {
             {meta ? (meta.title || host) : "loading…"}
           </span>
           {meta?.siteName && <span className="preview-site">{meta.siteName}</span>}
+          {!a.ok && a.error && <span className="preview-error">✕ {a.error}</span>}
           <span className="preview-desc">
             {meta ? (meta.description || meta.error || "") : ""}
           </span>
+          {a.chars ? <span className="preview-site">{a.chars.toLocaleString()} chars read</span> : null}
           {meta?.image && <img className="preview-image" src={meta.image} alt="" />}
           <span className="preview-url">{url}</span>
         </span>
