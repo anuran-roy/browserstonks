@@ -13,6 +13,22 @@ const DEFAULT_CONFIG = {
 let ws = null;
 let pending = [];      // queued messages while disconnected
 const msgIdSeq = { n: 0 };
+let keepaliveTimer = null;
+
+// MV3 service workers are killed after ~30s of inactivity; a websocket
+// alone doesn't keep them alive. Ping the CLI every 20s — traffic resets
+// the idle timer AND verifies the socket still works.
+function startKeepalive() {
+  if (keepaliveTimer) return;
+  keepaliveTimer = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: "ping" })); } catch { /* onclose follows */ }
+    } else {
+      // socket dropped (worker was asleep or CLI restarted): reconnect
+      connect();
+    }
+  }, 20000);
+}
 
 async function browserstonksGetConfig() {
   const stored = await chrome.storage.local.get("config");
@@ -47,6 +63,7 @@ function connect() {
     ws = new WebSocket(url);
     ws.onopen = () => {
       log("connected to CLI");
+      startKeepalive();
       while (pending.length) {
         const m = pending.shift();
         try {
@@ -372,9 +389,15 @@ function deliverChatReply(msg) {
   if (cb) {
     pendingChatReplies.delete(msg.requestId);
     cb(msg);
+  } else {
+    log("chat reply with no pending callback:", msg.requestId,
+        "(sidepanel reloaded?) — still applying events");
   }
   if (Array.isArray(msg.events) && msg.events.length) {
-    applyBrowserEvents(msg.events);
+    log("applying browser events from chat reply:",
+        msg.events.map((e) => e.type).join(", "));
+    applyBrowserEvents(msg.events).catch((e) =>
+      log("applyBrowserEvents failed:", e.message));
   }
 }
 
