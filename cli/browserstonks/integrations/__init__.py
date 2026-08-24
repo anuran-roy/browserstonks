@@ -162,14 +162,50 @@ class WebSocketIntegration(BaseIntegration):
 
             async def _run_chat(msg: dict) -> None:
                 request_id = msg.get("requestId")
+                harness = msg.get("harness", "opencode")
+                session_id = msg.get("sessionId", "primary")
+                # hard ceiling on a turn: even a hung harness (dead server,
+                # stuck subprocess) must produce a completion event so the
+                # UI never hangs. turnTimeout default 600s; error path below.
+                timeout = 620  # turnTimeout + margin; ChatHandler manages its own
                 try:
-                    resp = await self.dispatch(msg)
+                    resp = await asyncio.wait_for(
+                        self.dispatch(msg), timeout=timeout)
+                except asyncio.TimeoutError:
+                    _ws_log.error("chat %s timed out after %ss",
+                                  request_id, timeout)
+                    resp = {"type": "chat.response", "harness": harness,
+                            "reply": "⚠️ Timed out — the harness stopped "
+                                     "responding. Try again or Stop.",
+                            "error": "timeout", "requestId": request_id,
+                            "meta": {"completed": "timeout"}}
                 except Exception as e:  # noqa: BLE001
                     import traceback
                     traceback.print_exc()
                     resp = {"error": f"handler failed: {e}",
-                            "requestId": request_id}
+                            "requestId": request_id,
+                            "meta": {"completed": "error"}}
                 await _finish_chat(request_id, resp)
+                # ALWAYS push a completion signal — even if the reply itself
+                # was lost (client vanished, send failed above) the UI can
+                # unblock on this
+                status = "ok"
+                if isinstance(resp, dict):
+                    meta = resp.get("meta") or {}
+                    if resp.get("error") == "timeout" or \
+                            meta.get("completed") == "timeout":
+                        status = "timeout"
+                    elif resp.get("error") or meta.get("completed") == "error":
+                        status = "error"
+                    elif meta.get("stopped"):
+                        status = "stopped"
+                try:
+                    await self._send({
+                        "type": "chat.completed", "requestId": request_id,
+                        "harness": harness, "sessionId": session_id,
+                        "status": status})
+                except Exception:  # noqa: BLE001 - client gone
+                    pass
 
             try:
                 async for raw in ws:

@@ -128,11 +128,22 @@ function connect() {
         return;
       }
       if (msg.type === "chat.progress") {
-        // live model thinking/streaming from the CLI during a long turn
+        // live model thinking/streamed text -> sidepanel
         chrome.runtime.sendMessage({
           type: "CHAT_PROGRESS", requestId: msg.requestId,
           partType: msg.partType, text: msg.text,
-        }).catch(() => { /* sidepanel closed; ignore */ });
+        }).catch(() => {});
+        return;
+      }
+      if (msg.type === "chat.completed") {
+        // the CLI guarantees this fires exactly once per chat turn
+        // (ok/error/timeout/stopped) — the UI's hang-proof signal
+        log("chat completed:", msg.requestId, msg.status);
+        chrome.runtime.sendMessage({
+          type: "CHAT_COMPLETED", requestId: msg.requestId,
+          harness: msg.harness, sessionId: msg.sessionId,
+          status: msg.status,
+        }).catch(() => {});
         return;
       }
       if (msg.requestId && msg.sender && msg.tabId !== undefined && msg.program) {

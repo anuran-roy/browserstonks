@@ -29,6 +29,20 @@ function App() {
         setProgress({ text: buf.text, reasoning: buf.reasoning,
                       ts: Date.now() });
       }
+      if (msg.type === "CHAT_COMPLETED") {
+        // CLI's guaranteed end-of-turn signal (ok/error/timeout/stopped).
+        // The reply path usually settles first; this is the safety net
+        // when the reply never arrives (hung handler, dropped socket).
+        if (msg.status === "timeout") {
+          setMessages((m) => [...m, {
+            role: "system",
+            content: "⚠️ Turn timed out — the harness stopped responding.",
+          }]);
+        }
+        setBusy(false);
+        setStopping(false);
+        setProgress(null);
+      }
       if (msg.type === "CONNECTION_STATE") {
         setConnected(!!msg.connected);
         // system message below the chat when the CLI link breaks
@@ -90,10 +104,21 @@ function App() {
     setBusy(true);
     progressRef.current = { text: "", reasoning: "" };
     setProgress({ text: "", reasoning: "", ts: Date.now() });
+    // completion watchdog: the CLI pushes CHAT_COMPLETED exactly once per
+    // turn (ok/error/timeout/stopped). If the normal reply callback never
+    // fires (hung handler, lost response), this unblocks the UI anyway.
+    let settled = false;
+    const done = () => {
+      if (settled) return false;
+      settled = true;
+      setBusy(false);
+      setStopping(false);
+      setProgress(null);
+      refresh();
+      return true;
+    };
     try {
-      const resp = await chrome.runtime.sendMessage({
-        type: "CHAT", harness, sessionId, message: text,
-      });
+      const resp = await chrome.runtime.sendMessage({ type: "CHAT", harness, sessionId, message: text });
       if (resp?.error) {
         setMessages((m) => [...m, { role: "assistant", content: `⚠️ ${resp.error}`, error: true }]);
       } else {
@@ -104,14 +129,16 @@ function App() {
           reasoning: resp.meta?.reasoning || "",
         }]);
       }
+      done();
     } catch (e) {
       setMessages((m) => [...m, { role: "assistant", content: `⚠️ ${e.message}`, error: true }]);
-    } finally {
-      setBusy(false);
-      setStopping(false);
-      setProgress(null);
-      refresh();
+      done();
     }
+    // final safety net: if neither reply nor completion event arrived
+    // within 15 min, unblock anyway
+    setTimeout(() => { if (!done()) {
+      setMessages((m) => [...m, { role: "system", content: "⚠️ No response from CLI (connection lost?)" }]);
+    } }, 15 * 60 * 1000);
   }
 
   return (
