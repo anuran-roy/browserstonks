@@ -1,5 +1,7 @@
 # BrowserStonks
 
+<p align="center"><img src="./assets/browserstonks.png" height="400px"/></p>
+
 Turn any Chromium-based browser into an **agentic browser** — a Chrome extension + CLI system where AI agent harnesses can see the browser (form detection, tab/window/profile session tracking), act on it (fill forms, open tabs, create docs), and chat with you from a sidepanel.
 
 What began as form-filling automation is now a general browser-agent platform: the Chrome extension is the *first* integration for the CLI, and the CLI is the pluggable brain (LLMs, agent harnesses, MCP tools) behind any browser client.
@@ -158,6 +160,6 @@ CLI/                     Python CLI
 
 ## Status
 
-[x] Verified end-to-end against live services: the full plan/fill pipeline, the chat → action → browser-event round-trip
-[x] A real OpenCode server, and an OpenClaw gateway (transport level; its model backend was erroring independently).
-[x] Hermes integration is CLI-driven and provider-limited.
+- [x] Verified end-to-end against live services: the full plan/fill pipeline, the chat → action → browser-event round-trip
+- [x] A real OpenCode server, and an OpenClaw gateway (transport level; its model backend was erroring independently).
+- [x] Hermes integration is CLI-driven and provider-limited.
