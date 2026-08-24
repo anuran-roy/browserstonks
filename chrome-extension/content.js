@@ -221,5 +221,100 @@
     sendResponse({ ok: true, pong: msg.type === "PING_CONTENT" });
   });
 
+
+  // ------------------------------------------------- floating panel button
+  // A draggable button hugging the right edge of every page; click opens
+  // the BrowserStonks sidepanel. Position persists per-origin.
+  function mountPanelButton() {
+    if (document.getElementById("bs-panel-btn-host")) return;
+    const host = document.createElement("div");
+    host.id = "bs-panel-btn-host";
+    const shadow = host.attachShadow({ mode: "closed" });
+
+    const style = document.createElement("style");
+    style.textContent = `
+      .btn {
+        position: fixed; right: 0; top: 40%;
+        width: 30px; height: 84px;
+        background: linear-gradient(180deg, #4f46e5, #6366f1);
+        color: #fff; border: 0; border-radius: 10px 0 0 10px;
+        font: 600 11px -apple-system, "Segoe UI", system-ui, sans-serif;
+        writing-mode: vertical-rl; text-orientation: mixed;
+        cursor: grab; user-select: none; z-index: 2147483647;
+        box-shadow: -2px 2px 10px rgba(0,0,0,.25);
+        display: flex; align-items: center; justify-content: center;
+        padding: 6px 3px; box-sizing: border-box;
+        transition: filter .15s;
+      }
+      .btn:hover { filter: brightness(1.15); }
+      .btn.dragging { cursor: grabbing; filter: brightness(1.1); }
+    `;
+    shadow.appendChild(style);
+
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.textContent = "BrowserStonks";
+    btn.title = "Click to open the BrowserStonks chat panel — drag to reposition";
+    shadow.appendChild(btn);
+
+    // restore saved vertical position for this origin
+    const key = "bs-btn-top:" + location.origin;
+    try {
+      const saved = parseFloat(sessionStorage.getItem(key) || localStorage.getItem(key) || "");
+      if (!isNaN(saved)) btn.style.top = saved + "px";
+    } catch { /* storage may be blocked; default position is fine */ }
+
+    function clamp() {
+      const max = window.innerHeight - btn.offsetHeight - 8;
+      const cur = parseFloat(btn.style.top) || (window.innerHeight * 0.4);
+      btn.style.top = Math.max(8, Math.min(cur, max)) + "px";
+    }
+    clamp();
+    window.addEventListener("resize", clamp);
+
+    // drag along the right edge; a tiny move (< 5px) counts as a click
+    let dragging = false, moved = false, startY = 0, startTop = 0;
+    btn.addEventListener("pointerdown", (e) => {
+      dragging = true; moved = false;
+      startY = e.clientY;
+      startTop = parseFloat(btn.style.top) || (window.innerHeight * 0.4);
+      btn.setPointerCapture(e.pointerId);
+      btn.classList.add("dragging");
+      e.preventDefault();
+    });
+    btn.addEventListener("pointermove", (e) => {
+      if (!dragging) return;
+      const dy = e.clientY - startY;
+      if (Math.abs(dy) > 5) moved = true;
+      const max = window.innerHeight - btn.offsetHeight - 8;
+      btn.style.top = Math.max(8, Math.min(startTop + dy, max)) + "px";
+    });
+    btn.addEventListener("pointerup", (e) => {
+      if (!dragging) return;
+      dragging = false;
+      btn.classList.remove("dragging");
+      if (moved) {
+        // persist position
+        try {
+          localStorage.setItem(key, btn.style.top);
+          sessionStorage.setItem(key, btn.style.top);
+        } catch { /* ignore */ }
+      } else {
+        // click: open the sidepanel via the background worker
+        chrome.runtime.sendMessage({ type: "OPEN_CHAT_PANEL" })
+          .catch(() => log("panel open failed (extension context?)"));
+      }
+    });
+
+    document.documentElement.appendChild(host);
+    log("panel button mounted (right edge)");
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", mountPanelButton);
+  } else {
+    mountPanelButton();
+  }
+
   log("content script ready");
 })();
