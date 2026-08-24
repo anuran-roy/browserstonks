@@ -70,11 +70,17 @@ def _run_process_code(code: str, html: str, timeout: float = 30) -> Any:
 class ChatHandler:
     def __init__(self, harness_manager: HarnessManager,
                  tracker: SessionTracker, bus: EventBus,
-                 docs_dir: Path | None = None) -> None:
+                 docs_dir: Path | None = None,
+                 tab_reader: Any = None) -> None:
         self.harnesses = harness_manager
         self.tracker = tracker
         self.bus = bus
         self.docs_dir = docs_dir or Path.cwd() / "docs"
+        # callable(tab_id) -> html str (sync or async); None when the
+        # active integration can't read tabs (e.g. stdio-only mode).
+        # Set here OR injected later by serve() for integrations that
+        # only become readable once started.
+        self.tab_reader = tab_reader
 
     # ------------------------------------------------------------------ turn
     async def handle(self, msg: dict[str, Any]) -> dict[str, Any]:
