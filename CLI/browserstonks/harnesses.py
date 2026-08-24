@@ -182,6 +182,12 @@ class OpenCodeHarness(BaseHarness):
         super().__init__(config)
         self.mode = "server" if self.config.get("base_url") else "local"
         self.sessions: dict[str, str] = {}  # our session id -> opencode session id
+        # SSE event bus (server mode): one background thread consuming
+        # /event; turns subscribe to events for their session.
+        self._sse_events: list[dict] = []
+        self._sse_lock = __import__("threading").Lock()
+        self._sse_subscribers: dict[str, list] = {}  # sessionID -> [queue]
+        self._sse_thread = None
 
     def _local(self, args: list[str], stdin: str | None = None,
                timeout: int = 120) -> str:
@@ -235,9 +241,79 @@ class OpenCodeHarness(BaseHarness):
             stdin=None, timeout=self.config.get("timeout", 300))
         return {"reply": out, "actions": _extract_actions(out), "meta": {"mode": "local"}}
 
+    # ------------------------------------------------------------ SSE support
+    def _ensure_sse(self) -> bool:
+        """Start the /event SSE listener thread (server mode only)."""
+        if self.mode != "server":
+            return False
+        if self._sse_thread and self._sse_thread.is_alive():
+            return True
+        import threading
+
+        def _listen():
+            import time as _t
+            base = self.config["base_url"].rstrip("/")
+            while True:
+                try:
+                    req = urllib.request.Request(
+                        f"{base}/event", headers=self._headers())
+                    with urllib.request.urlopen(req, timeout=600) as resp:
+                        for raw in resp:
+                            line = raw.decode(errors="replace").strip()
+                            if not line.startswith("data:"):
+                                continue
+                            try:
+                                ev = json.loads(line[5:].strip())
+                            except ValueError:
+                                continue
+                            self._dispatch_sse(ev)
+                except Exception as e:  # noqa: BLE001 - reconnect
+                    _h_log.warning("opencode SSE disconnected (%s); "
+                                   "reconnecting in 2s", e)
+                    _t.sleep(2)
+
+        self._sse_thread = threading.Thread(target=_listen, daemon=True,
+                                            name="opencode-sse")
+        self._sse_thread.start()
+        _h_log.info("opencode SSE event stream connected")
+        return True
+
+    def _dispatch_sse(self, ev: dict) -> None:
+        import queue as _q
+        props = ev.get("properties", {}) or {}
+        sid = props.get("sessionID") or ""
+        etype = ev.get("type", "")
+        with self._sse_lock:
+            # keep a bounded rolling log for debugging
+            self._sse_events.append({"type": etype, "sessionID": sid})
+            if len(self._sse_events) > 500:
+                del self._sse_events[:250]
+            subs = list(self._sse_subscribers.get(sid, []))
+        for q in subs:
+            try:
+                q.put_nowait(ev)
+            except _q.Full:
+                pass
+
+    def _subscribe(self, session_id: str, maxsize: int = 200):
+        import queue as _q
+        q = _q.Queue(maxsize=maxsize)
+        with self._sse_lock:
+            self._sse_subscribers.setdefault(session_id, []).append(q)
+        return q
+
+    def _unsubscribe(self, session_id: str, q) -> None:
+        with self._sse_lock:
+            try:
+                self._sse_subscribers.get(session_id, []).remove(q)
+            except ValueError:
+                pass
+
     def _send_server(self, oc_session: str, prompt: str, on_progress) -> dict[str, Any]:
-        """Async prompt + poll: no HTTP timeout on long thinking turns, and
-        partial text/reasoning streamed to on_progress as it arrives."""
+        """Async prompt + live SSE streaming (no polling).
+
+        Falls back to polling when the SSE stream can't be established.
+        """
         import time as _t
 
         body: dict[str, Any] = {"parts": [{"type": "text", "text": prompt}]}
@@ -247,65 +323,103 @@ class OpenCodeHarness(BaseHarness):
         model = self.config.get("model")
         if model:
             body["model"] = model
-        # 204 immediately; the agent works in the background
-        self._http("POST", f"/session/{oc_session}/prompt_async", body,
-                   timeout=30)
 
-        deadline = _t.monotonic() + self.config.get("turnTimeout", 600)
-        sent: dict[int, int] = {}  # messageID -> chars already reported
-        reply = ""
-        reasoning = ""
-        polls = 0
-        last_size = -1
-        while _t.monotonic() < deadline:
-            _t.sleep(self.config.get("pollInterval", 1.0))
-            msgs = self._http("GET", f"/session/{oc_session}/message",
-                              timeout=30)
-            polls += 1
-            size = len(json.dumps(msgs))
-            if size != last_size:
-                _h_log.debug("poll %d: payload %d bytes (grew)" if size > last_size
-                             else "poll %d: payload %d bytes", polls, size)
-                last_size = size
-            for m in msgs:
-                info = m.get("info", {})
-                if info.get("role") != "assistant":
-                    continue
-                mid = info.get("id", "")
-                for p in m.get("parts", []):
-                    ptype, text = p.get("type"), p.get("text", "") or ""
-                    if ptype not in ("text", "reasoning") or not text:
-                        continue
-                    already = sent.get(id(p), 0)
-                    if len(text) > already:
-                        _h_log.info("%s streaming %s delta +%d chars (total %d)",
-                                    self.name, ptype, len(text) - already,
-                                    len(text))
-                        if on_progress:
-                            on_progress({"type": ptype, "text": text[already:]})
-                        sent[id(p)] = len(text)
-                if info.get("id"):
-                    parts_text = " ".join(
-                        p.get("text", "") for p in m.get("parts", [])
-                        if p.get("type") == "text")
-                    if parts_text and info.get("finish") == "stop":
-                        reply = parts_text
-                    r_text = " ".join(
-                        p.get("text", "") for p in m.get("parts", [])
-                        if p.get("type") == "reasoning")
-                    if r_text:
-                        reasoning = r_text
-                if info.get("finish") == "error":
-                    raise HarnessError(
-                        f"opencode agent error: {info.get('error', 'unknown')}")
-            if reply:
-                _h_log.info("%s turn finished after %d poll(s)", self.name, polls)
-                return {"reply": reply, "actions": _extract_actions(reply),
-                        "meta": {"mode": "server", "session": oc_session,
-                                 "reasoning": reasoning[:2000]}}
-        raise HarnessError(
-            f"opencode turn did not finish within "
-            f"{self.config.get('turnTimeout', 600)}s")
+        use_sse = self._ensure_sse()
+        queue = self._subscribe(oc_session) if use_sse else None
+        try:
+            # 204 immediately; the agent works in the background
+            self._http("POST", f"/session/{oc_session}/prompt_async", body,
+                       timeout=30)
+
+            deadline = _t.monotonic() + self.config.get("turnTimeout", 600)
+            sent: dict[str, int] = {}
+            reply = ""
+            reasoning = ""
+            while _t.monotonic() < deadline:
+                ev = None
+                if queue is not None:
+                    try:
+                        ev = queue.get(timeout=self.config.get("pollInterval", 1.0))
+                    except Exception:  # noqa: BLE001 - queue.Empty
+                        ev = None
+                if ev is None:
+                    # SSE idle (or unavailable): fall back to one poll so we
+                    # still make progress even if events were missed
+                    msgs = self._http("GET", f"/session/{oc_session}/message",
+                                      timeout=30)
+                    new = self._scan_messages(msgs, sent, on_progress)
+                    reply, reasoning = new if new else (reply, reasoning)
+                else:
+                    etype = ev.get("type", "")
+                    props = ev.get("properties", {}) or {}
+                    if etype == "message.part.updated":
+                        part = props.get("part", {})
+                        self._emit_part(part, sent, on_progress)
+                    elif etype == "message.updated":
+                        info = props.get("info", {})
+                        if info.get("role") == "assistant":
+                            if info.get("finish") == "error":
+                                raise HarnessError(
+                                    f"opencode agent error: "
+                                    f"{info.get('error', 'unknown')}")
+                            if info.get("finish") == "stop":
+                                # fetch once for the final assembled parts
+                                msgs = self._http(
+                                    "GET", f"/session/{oc_session}/message",
+                                    timeout=30)
+                                new = self._scan_messages(msgs, sent, on_progress)
+                                reply, reasoning = new if new else (reply, reasoning)
+                if reply:
+                    _h_log.info("opencode turn finished via %s",
+                                "SSE" if queue is not None else "polling")
+                    return {"reply": reply, "actions": _extract_actions(reply),
+                            "meta": {"mode": "server", "session": oc_session,
+                                     "reasoning": reasoning[:2000]}}
+            raise HarnessError(
+                f"opencode turn did not finish within "
+                f"{self.config.get('turnTimeout', 600)}s")
+        finally:
+            if queue is not None:
+                self._unsubscribe(oc_session, queue)
+
+    def _emit_part(self, part: dict, sent: dict, on_progress) -> None:
+        """Stream a text/reasoning part delta if it grew."""
+        ptype, text = part.get("type"), part.get("text", "") or ""
+        pid = part.get("id", id(part))
+        if ptype not in ("text", "reasoning") or not text:
+            return
+        already = sent.get(pid, 0)
+        if len(text) > already:
+            _h_log.info("opencode streaming %s delta +%d chars (total %d)",
+                        ptype, len(text) - already, len(text))
+            if on_progress:
+                on_progress({"type": ptype, "text": text[already:]})
+            sent[pid] = len(text)
+
+    def _scan_messages(self, msgs: list, sent: dict, on_progress):
+        """Polling fallback: scan messages for parts + final reply."""
+        reply, reasoning = "", ""
+        for m in msgs:
+            info = m.get("info", {})
+            if info.get("role") != "assistant":
+                continue
+            for p in m.get("parts", []):
+                self._emit_part(p, sent, on_progress)
+            if info.get("finish") == "error":
+                raise HarnessError(
+                    f"opencode agent error: {info.get('error', 'unknown')}")
+            if info.get("finish") == "stop":
+                parts_text = " ".join(
+                    p.get("text", "") for p in m.get("parts", [])
+                    if p.get("type") == "text")
+                if parts_text:
+                    reply = parts_text
+                r_text = " ".join(
+                    p.get("text", "") for p in m.get("parts", [])
+                    if p.get("type") == "reasoning")
+                if r_text:
+                    reasoning = r_text
+        return reply, reasoning or None
 
     def _build_prompt(self, message: str, context: dict[str, Any] | None) -> str:
         # legacy alias: kept so plugins subclassing OpenCodeHarness keep working
