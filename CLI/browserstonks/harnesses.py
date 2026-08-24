@@ -67,11 +67,16 @@ class BaseHarness:
 
     # -- the actual agent turn -------------------------------------------------
     def send(self, session: HarnessSession, message: str,
-             context: dict[str, Any] | None = None) -> dict[str, Any]:
+             context: dict[str, Any] | None = None,
+             on_progress=None) -> dict[str, Any]:
         """Return {"reply": str, "actions": [...], "meta": {...}}.
 
         actions: [{op: "tab.new"|"doc.create"|..., **args}] — applied by
         the CLI's action router, which emits browser events / writes docs.
+
+        on_progress: optional callback({"type": "text"|"reasoning",
+        "text": delta}) for live streaming to the chat panel. Harnesses
+        that can't stream simply never call it.
         """
         raise NotImplementedError
 
@@ -219,30 +224,75 @@ class OpenCodeHarness(BaseHarness):
         self.sessions.pop(session.session_id, None)
 
     def send(self, session: HarnessSession, message: str,
-             context: dict[str, Any] | None = None) -> dict[str, Any]:
+             context: dict[str, Any] | None = None,
+             on_progress=None) -> dict[str, Any]:
         oc_session = self.sessions.get(session.session_id, session.session_id)
         prompt = _shared_prompt(self.config, message, context)
         if self.mode == "server":
-            body: dict[str, Any] = {
-                "parts": [{"type": "text", "text": prompt}],
-            }
-            agent = self.config.get("agent")
-            if agent:
-                body["agent"] = agent
-            model = self.config.get("model")
-            if model:
-                body["model"] = model
-            data = self._http("POST", f"/session/{oc_session}/message", body)
-            text = "\n".join(
-                p.get("text", "") for p in data.get("parts", [])
-                if p.get("type") == "text")
-            return {"reply": text, "actions": _extract_actions(text),
-                    "meta": {"mode": "server",
-                             "session": data.get("info", {}).get("id", oc_session)}}
+            return self._send_server(oc_session, prompt, on_progress)
         out = self._local(
-            ["run", oc_session, prompt],
-            stdin=None, timeout=timeout)
+            [oc_session, prompt],
+            stdin=None, timeout=self.config.get("timeout", 300))
         return {"reply": out, "actions": _extract_actions(out), "meta": {"mode": "local"}}
+
+    def _send_server(self, oc_session: str, prompt: str, on_progress) -> dict[str, Any]:
+        """Async prompt + poll: no HTTP timeout on long thinking turns, and
+        partial text/reasoning streamed to on_progress as it arrives."""
+        import time as _t
+
+        body: dict[str, Any] = {"parts": [{"type": "text", "text": prompt}]}
+        agent = self.config.get("agent")
+        if agent:
+            body["agent"] = agent
+        model = self.config.get("model")
+        if model:
+            body["model"] = model
+        # 204 immediately; the agent works in the background
+        self._http("POST", f"/session/{oc_session}/prompt_async", body,
+                   timeout=30)
+
+        deadline = _t.monotonic() + self.config.get("turnTimeout", 600)
+        sent: dict[int, int] = {}  # messageID -> chars already reported
+        reply = ""
+        reasoning = ""
+        while _t.monotonic() < deadline:
+            _t.sleep(self.config.get("pollInterval", 1.0))
+            msgs = self._http("GET", f"/session/{oc_session}/message",
+                              timeout=30)
+            for m in msgs:
+                info = m.get("info", {})
+                if info.get("role") != "assistant":
+                    continue
+                mid = info.get("id", "")
+                for p in m.get("parts", []):
+                    ptype, text = p.get("type"), p.get("text", "") or ""
+                    if ptype not in ("text", "reasoning") or not text:
+                        continue
+                    already = sent.get(id(p), 0)
+                    if len(text) > already and on_progress:
+                        on_progress({"type": ptype, "text": text[already:]})
+                        sent[id(p)] = len(text)
+                if info.get("id"):
+                    parts_text = " ".join(
+                        p.get("text", "") for p in m.get("parts", [])
+                        if p.get("type") == "text")
+                    if parts_text and info.get("finish") == "stop":
+                        reply = parts_text
+                    r_text = " ".join(
+                        p.get("text", "") for p in m.get("parts", [])
+                        if p.get("type") == "reasoning")
+                    if r_text:
+                        reasoning = r_text
+                if info.get("finish") == "error":
+                    raise HarnessError(
+                        f"opencode agent error: {info.get('error', 'unknown')}")
+            if reply:
+                return {"reply": reply, "actions": _extract_actions(reply),
+                        "meta": {"mode": "server", "session": oc_session,
+                                 "reasoning": reasoning[:2000]}}
+        raise HarnessError(
+            f"opencode turn did not finish within "
+            f"{self.config.get('turnTimeout', 600)}s")
 
     def _build_prompt(self, message: str, context: dict[str, Any] | None) -> str:
         # legacy alias: kept so plugins subclassing OpenCodeHarness keep working
@@ -446,8 +496,13 @@ class HarnessManager:
         return self.instances[name]
 
     def chat(self, harness: str, message: str, session_id: str = "primary",
-             context: dict[str, Any] | None = None) -> dict[str, Any]:
-        """One agentic turn; returns the harness response dict."""
+             context: dict[str, Any] | None = None,
+             on_progress=None) -> dict[str, Any]:
+        """One agentic turn; returns the harness response dict.
+
+        on_progress (optional) is forwarded to harnesses that stream
+        ({"type": "text"|"reasoning", "text": delta} per call).
+        """
         h = self._harness(harness)
         live = self.sessions.setdefault(harness, {})
         sess = live.get(session_id)
@@ -456,7 +511,13 @@ class HarnessManager:
             sess = live[session_id] = h.start_session(session_id, context or {})
         sess.record("user", message)
         try:
-            result = h.send(sess, message, context)
+            send = h.send
+            import inspect as _inspect
+            if (on_progress is not None
+                    and "on_progress" in _inspect.signature(send).parameters):
+                result = send(sess, message, context, on_progress=on_progress)
+            else:
+                result = send(sess, message, context)
         except HarnessError as e:
             _h_log.error("%s/%s turn failed: %s", harness, session_id, e)
             return {"reply": f"⚠️ harness error: {e}", "actions": [], "meta": {"error": str(e)}}

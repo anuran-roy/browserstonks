@@ -98,6 +98,14 @@ function connect() {
         deliverChatReply(msg);
         return;
       }
+      if (msg.type === "chat.progress") {
+        // live model thinking/streaming from the CLI during a long turn
+        chrome.runtime.sendMessage({
+          type: "CHAT_PROGRESS", requestId: msg.requestId,
+          partType: msg.partType, text: msg.text,
+        }).catch(() => { /* sidepanel closed; ignore */ });
+        return;
+      }
       if (msg.requestId && msg.sender && msg.tabId !== undefined && msg.program) {
         // forward the CLI's plan to the offscreen document, which runs
         // Pyodide (bundled WASM) and relays page calls to the content script

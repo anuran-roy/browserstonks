@@ -63,7 +63,13 @@ class BaseIntegration:
             return plan
 
         if mtype == "chat" and self.chat_handler is not None:
-            resp = await self.chat_handler.handle(msg)
+            conn = getattr(self, "_conn", None)
+
+            async def _emit(ev: dict) -> None:
+                if conn is not None:
+                    await conn.send(json.dumps(ev))
+
+            resp = await self.chat_handler.handle(msg, emit=_emit)
             resp["requestId"] = msg.get("requestId")
             # flush queued browser events to this client
             if self.bus is not None:

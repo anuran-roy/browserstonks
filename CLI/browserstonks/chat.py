@@ -87,12 +87,33 @@ class ChatHandler:
         self.tab_reader = tab_reader
 
     # ------------------------------------------------------------------ turn
-    async def handle(self, msg: dict[str, Any]) -> dict[str, Any]:
+    async def handle(self, msg: dict[str, Any], emit=None) -> dict[str, Any]:
+        """emit: optional async callable(dict) receiving live progress events
+        ({type: "chat.progress", requestId, partType, text}) so the chat
+        panel can show the model thinking while it works."""
         harness = msg.get("harness", "opencode")
         session_id = msg.get("sessionId", "primary")
         message = (msg.get("message") or "").strip()
         if not message:
             return {"type": "chat.response", "error": "empty message"}
+
+        request_id = msg.get("requestId")
+
+        def on_progress(delta: dict) -> None:
+            """Sync callback from harnesses; schedule the async emit."""
+            if emit is None:
+                return
+            try:
+                import asyncio as _a
+                ev = {"type": "chat.progress", "requestId": request_id,
+                      "harness": harness,
+                      "partType": delta.get("type", "text"),
+                      "text": delta.get("text", "")}
+                _a.get_running_loop().create_task(_maybe_await(emit(ev)))
+            except RuntimeError:
+                pass  # no running loop (sync callers) — skip progress
+            except Exception:  # noqa: BLE001 - never let progress kill a turn
+                pass
 
         context = self._context()
         _chat_log.info("turn start %s/%s (message %d chars)",
@@ -103,7 +124,8 @@ class ChatHandler:
         for _round in range(4):
             _chat_log.debug("harness round %d: sending %d chars",
                             _round + 1, len(reply_text))
-            result = self.harnesses.chat(harness, reply_text, session_id, context)
+            result = self.harnesses.chat(harness, reply_text, session_id,
+                                         context, on_progress=on_progress)
             reply_text = ""
             actions = result.get("actions", [])
             if not any(a["op"] in ("tab.read", "tab.process") for a in actions):

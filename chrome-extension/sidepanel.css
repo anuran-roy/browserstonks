@@ -28,6 +28,24 @@ header select { background: var(--bg); color: var(--text); border: 1px solid var
 .bubble.error { border-color: var(--bad); }
 .bubble.thinking { color: var(--muted); font-style: italic; }
 
+/* live progress during long model turns */
+.bubble.live { border-style: dashed; }
+.thinking-stream { margin-bottom: 6px; }
+.thinking-label { color: var(--muted); font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 3px; }
+.thinking-text { color: var(--muted); font-size: 12px; white-space: pre-wrap;
+  max-height: 120px; overflow-y: auto; border-left: 2px solid var(--border);
+  padding-left: 8px; }
+.pulse { display: inline-block; width: 7px; height: 7px; margin-left: 6px;
+  border-radius: 50%; background: var(--accent); animation: blink 1.2s infinite; }
+.pulse.hidden { display: none; }
+@keyframes blink { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+details.reasoning { margin-bottom: 6px; font-size: 12px; }
+details.reasoning summary { color: var(--muted); cursor: pointer; }
+.reasoning-body { color: var(--muted); white-space: pre-wrap;
+  max-height: 200px; overflow-y: auto; border-left: 2px solid var(--border);
+  padding-left: 8px; margin-top: 4px; }
+
 /* streamdown content inside bubbles */
 .bubble.assistant :is(p, ul, ol, pre, blockquote) { margin: 0.35em 0; }
 .bubble.assistant pre { background: var(--bg); padding: 8px; border-radius: 6px;

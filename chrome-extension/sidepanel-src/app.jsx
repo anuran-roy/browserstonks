@@ -7,14 +7,33 @@ import { Streamdown } from "streamdown";
 const HARNESS_ORDER = ["opencode", "openclaw", "hermes"];
 
 function App() {
-  const [messages, setMessages] = useState([]); // {role, content, actions?, error?}
+  const [messages, setMessages] = useState([]); // {role, content, actions?, error?, reasoning?}
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [harnesses, setHarnesses] = useState([]);
   const [harness, setHarness] = useState("opencode");
   const [sessionId] = useState(() => "sp-" + Date.now().toString(36));
   const [connected, setConnected] = useState(false);
+  const [progress, setProgress] = useState(null); // {text, reasoning, ts}
   const listRef = useRef(null);
+  const progressRef = useRef({ text: "", reasoning: "" });
+
+  // live model thinking/streamed text pushed from the background worker
+  useEffect(() => {
+    const listener = (msg, _sender, sendResponse) => {
+      if (msg.type === "CHAT_PROGRESS") {
+        const buf = progressRef.current;
+        if (msg.partType === "reasoning") buf.reasoning += msg.text;
+        else buf.text += msg.text;
+        setProgress({ text: buf.text, reasoning: buf.reasoning,
+                      ts: Date.now() });
+      }
+      // ack so the channel doesn't complain
+      if (sendResponse) sendResponse({ ok: true });
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, []);
 
   // ask the background worker for CLI status + available harnesses
   const refresh = useCallback(async () => {
@@ -33,7 +52,7 @@ function App() {
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
-  }, [messages, busy]);
+  }, [messages, busy, progress]);
 
   async function send() {
     const text = input.trim();
@@ -41,6 +60,8 @@ function App() {
     setInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);
     setBusy(true);
+    progressRef.current = { text: "", reasoning: "" };
+    setProgress({ text: "", reasoning: "", ts: Date.now() });
     try {
       const resp = await chrome.runtime.sendMessage({
         type: "CHAT", harness, sessionId, message: text,
@@ -52,12 +73,14 @@ function App() {
           role: "assistant",
           content: resp.reply || "*(empty reply)*",
           actions: resp.actionsApplied || [],
+          reasoning: resp.meta?.reasoning || "",
         }]);
       }
     } catch (e) {
       setMessages((m) => [...m, { role: "assistant", content: `⚠️ ${e.message}`, error: true }]);
     } finally {
       setBusy(false);
+      setProgress(null);
       refresh();
     }
   }
@@ -84,6 +107,10 @@ function App() {
         )}
         {messages.map((m, i) => (
           <div key={i} className={"bubble " + m.role + (m.error ? " error" : "")}>
+            {m.reasoning && <details className="reasoning">
+              <summary>💭 thinking</summary>
+              <div className="reasoning-body">{m.reasoning}</div>
+            </details>}
             {m.role === "assistant"
               ? <Streamdown>{m.content}</Streamdown>
               : <div className="user-text">{m.content}</div>}
@@ -98,7 +125,22 @@ function App() {
             )}
           </div>
         ))}
-        {busy && <div className="bubble assistant thinking">thinking…</div>}
+        {busy && (
+          <div className="bubble assistant live">
+            {progress?.reasoning && (
+              <div className="thinking-stream">
+                <div className="thinking-label">💭 thinking…</div>
+                <div className="thinking-text">{progress.reasoning.slice(-600)}</div>
+              </div>
+            )}
+            {progress?.text
+              ? <Streamdown>{progress.text}</Streamdown>
+              : <span className="thinking-label">
+                  {progress?.reasoning ? "" : "waiting for the model…"}
+                </span>}
+            <span className={"pulse" + (progress?.text ? " hidden" : "")} />
+          </div>
+        )}
       </div>
 
       <footer>
