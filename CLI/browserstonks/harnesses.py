@@ -380,6 +380,19 @@ class OpenCodeHarness(BaseHarness):
             user_ids: set = set()       # the new user message(s) — echo guard
             reply = ""
             reasoning = ""
+
+            def _session_busy() -> bool:
+                """True while the agent is still running this turn.
+                A tool-using turn emits MULTIPLE assistant messages (one
+                per tool step); each gets finish=stop but only the last
+                carries the text reply. The session-level busy/idle flag
+                is the authoritative 'still working' signal."""
+                try:
+                    st = self._http("GET", "/session/status", timeout=15)
+                    return st.get(oc_session, {}).get("type") == "busy"
+                except HarnessError:
+                    return True  # can't tell — assume still working
+
             while _t.monotonic() < deadline:
                 ev = None
                 if queue is not None:
@@ -419,16 +432,10 @@ class OpenCodeHarness(BaseHarness):
                                 raise HarnessError(
                                     f"opencode agent error: "
                                     f"{info.get('error', 'unknown')}")
-                            if info.get("finish") == "stop":
-                                # fetch once for the final assembled parts
-                                msgs = self._http(
-                                    "GET", f"/session/{oc_session}/message",
-                                    timeout=30)
-                                new = self._scan_messages(
-                                    msgs, known_ids, assistant_ids,
-                                    sent, on_progress)
-                                reply, reasoning = new if new else (reply, reasoning)
-                if reply:
+                # a finishing assistant message does NOT mean the turn is
+                # done (tool steps finish too) — only the session going
+                # idle + a text reply means completion
+                if reply and not _session_busy():
                     _h_log.info("opencode turn finished via %s",
                                 "SSE" if queue is not None else "polling")
                     return {"reply": reply, "actions": _extract_actions(reply),
