@@ -29,6 +29,10 @@ ACTION LINES — put each on its own row, exactly in these formats:
                                      (```html / ```markdown / ```text) in the same reply.
 
 Rules for actions:
+- CRITICAL: do NOT use your tools (bash, edit, etc.) for browser actions.
+  Opening URLs, reading pages, browsing — that is what action lines are
+  for. Never run curl/wget; the pages must be read through the user's
+  browser (action lines), which has their sessions and login state.
 - Only emit action lines when the user wants you to act (open, browse,
   close, read, process, create). Never emit them speculatively.
 - Use real, complete URLs (include the https:// scheme).
