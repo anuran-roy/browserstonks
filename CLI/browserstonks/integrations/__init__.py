@@ -160,13 +160,29 @@ class WebSocketIntegration(BaseIntegration):
                                 resp.setdefault("requestId", msg.get("requestId"))
                             if "tabId" not in resp and msg.get("tabId") is not None:
                                 resp["tabId"] = msg.get("tabId")
-                        await self._send(resp)
+                        try:
+                            await self._send(resp)
+                        except Exception:  # noqa: BLE001 - client vanished
+                            _ws_log.info("client went away mid-reply %s",
+                                         ws.remote_address)
+                            break
                         self._log_msg(msg, resp)
+            except Exception as e:  # noqa: BLE001 - normal disconnects
+                # Chrome suspending the MV3 worker drops the socket with a
+                # reset/close; it reconnects on its own — not an error
+                _ws_log.info("connection closed (%s: %s); expecting reconnect",
+                             type(e).__name__, str(e)[:80])
             finally:
                 self._conn = None
                 _ws_log.info("client disconnected %s", ws.remote_address)
 
-        async with websockets.serve(on_conn, self.host, self.port):
+        async with websockets.serve(
+                on_conn, self.host, self.port,
+                # The extension runs its own app-level keepalive (a JSON
+                # ping every 20s). The library's protocol-level keepalive
+                # kills connections when Chrome suspends the MV3 worker
+                # (protocol pings don't reset that), so disable it.
+                ping_interval=None, ping_timeout=None):
             _ws_log.info("listening on ws://%s:%s", self.host, self.port)
             await asyncio.Future()  # run forever
 
