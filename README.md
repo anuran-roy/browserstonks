@@ -40,13 +40,28 @@ What began as form-filling automation is now a general browser-agent platform: t
 ### Sidepanel chat (agent harnesses)
 - React + **Vercel streamdown** chat UI (bundled, CSP-safe, no CDN)
 - Talk to coding-agent harnesses that can drive the browser:
-  - **OpenCode** — local binary or HTTP server (verified protocol)
+  - **OpenCode** — local binary or HTTP server with **live SSE streaming** (thinking + text deltas as they're generated), async prompts (no HTTP timeouts on long turns), multi-turn memory, and automatic tool-permission approval
   - **OpenClaw** — gateway `/tools/invoke` API with bearer auth
   - **Hermes** — via the `hermes` CLI
   - any other harness via the `browserstonks_harnesses` plugin group
 - Harnesses reply in markdown and can emit actions:
   `[[tab.new|https://…]]`, `[[doc.create|markdown|notes.md]]`, …
 - The CLI applies actions: opens/closes real tabs, writes HTML/markdown/text docs to `media/<sessionId>/` and opens them — optionally publishing to managed storage (Cloudinary default, S3, GCS) and opening the served URL
+- **Live model thinking** — the model's reasoning stream renders in the panel while it works (💭 thinking); the final message keeps a collapsible full-reasoning section
+- **Stop button** — terminate any running turn instantly (aborts the harness-side run too, e.g. OpenCode session abort); hung responses can't freeze the UI (guaranteed `chat.completed` signal + hard turn timeout + client safety nets)
+- **Session history** — every conversation is persisted under `cli/sessions/`; a picker below the harness dropdown lists saved sessions (title + message count), restores transcripts, and continues where you left off
+- **Multi-round work loop** — harnesses chain `tab.read`/`tab.process` actions until the whole task is done (open → read → analyze → more reads → final report), without needing "Continue" prompts
+
+### Reading & processing pages (the harness's eyes)
+- `tab.read` — harness reads any open tab's HTML through *your* browser (login state, sessions, everything)
+- `tab.process` — harness writes its own `process(HTML)` Python (stdlib, 30s timeout) and gets the result back
+- Read/process failures are fed back so the model can adapt (open the tab, then retry)
+
+### Interactive action badges (link previews)
+Every action badge (`tab.new ✓`, `tab.read ✕`, `doc.create ✓`…) is interactive:
+- **Hover** — a rich Google-search-style preview card: favicon, hostname, page title, Open Graph description/site name/image — judge how legit a referenced site is before visiting
+- **Click** — jump to the exact tab that action opened (or reopen the URL if it's gone)
+- Failed badges show their error inline; successful reads show chars read
 
 ### Browser session awareness
 - The extension reports a full session snapshot on connect and deltas on every tab/window change
@@ -65,6 +80,17 @@ OpenRouter, OpenAI (and any OpenAI-compatible base_url), Anthropic, or offline (
 ### Harness server authentication
 Per-harness `auth` block in `config.jsonc`: bearer, basic, apikey (custom header or query param), plus arbitrary extra headers — for any secure server-mode harness.
 
+### Secure internet mode (connection tokens)
+Expose the CLI beyond localhost safely:
+- Issue tokens: `browserstonks tokens issue --label work-laptop` (plaintext shown once; SHA-256 hash stored), `revoke` / `list` to manage
+- With `auth.required: true`, every websocket connection must authenticate with a valid token as its first message — invalid/missing tokens are dropped at the gate
+- Token database: **SQLite** by default (`tokens.db`); `auth.database` accepts `postgres://…` / `mongodb://…` DSNs for shared DBs
+- Extension side: **Secure auth** checkbox in the popup reveals a token field; the background worker sends it on every connect/reconnect
+
+### Managed storage for generated content
+- `doc.create` always writes locally to `media/<sessionId>/`; with `storage.enabled: true` it **also uploads** and the `doc.open` action opens the hosted URL
+- Providers: **Cloudinary** (default), **Amazon S3**, **Google Cloud Storage** — all via raw HTTP, no SDKs; credentials in `.env`
+
 ### Custom MCP servers
 Declare Model Context Protocol servers in `config.jsonc` (`mcpServers`); launched over stdio JSON-RPC, tools listed and callable by the planner.
 
@@ -72,6 +98,9 @@ Declare Model Context Protocol servers in `config.jsonc` (`mcpServers`); launche
 - `config.jsonc` — JSON-with-comments config; `${VAR}` env expansion
 - `config.schema.jsonc` — schema of every allowed field; `serve` auto-syncs it with the packaged schema; `doctor` validates
 - `.env` — loaded before integrations start (see `.env.example`)
+
+### Structured logging
+Named subsystem loggers (`ws`, `chat`, `harness`, `actions`, `plan`, `answers`, `mcp`, `plugins`, `auth`, `storage`, `sessions`), one INFO line per pipeline step, DEBUG for payloads; `--verbose`/`--debug`, `BROWSERSTONKS_LOG`, or `BS_VERBOSE`/`BS_DEBUG` with `start.sh`.
 
 ### Headless / CI-ready (by design)
 The event bus records browser events when no browser is attached, so the same action pipeline can run headless and be asserted on later — the foundation for CI/CD automation without a display.
@@ -174,3 +203,33 @@ cli/                     Python CLI
 - [x] Verified end-to-end against live services: the full plan/fill pipeline, chat → action → browser-event round-trips, and multi-round research turns (open tabs, read HTML through the user's browser, chained reads, doc creation)
 - [x] OpenCode server mode fully verified live: SSE thinking streams, multi-turn memory, tool-use turns with auto-approved permissions
 - [x] OpenClaw gateway verified at transport level; Hermes is CLI-driven (provider-limited).
+
+## Changelog
+
+### 2026-08-25 — Secure internet mode and content publishing
+- **Connection-token auth**: `browserstonks tokens issue/revoke/list`; SHA-256-hashed tokens in SQLite (default) / Postgres / Mongo; websocket auth gate (`auth.required`) closes unauthenticated connections; extension **Secure auth** checkbox + token field in the popup
+- **Managed storage**: `doc.create` uploads to **Cloudinary (default) / S3 / GCS** after the local write (raw HTTP, no SDKs); `doc.open` opens the hosted URL
+- Generated content moved to `media/<sessionId>/` (per-session folders); `cli/docs/` unignored and reserved for developer documentation
+- Fix: `tokens issue` stdout polluted by log lines (broke copy-pasted tokens); server now strips token whitespace
+
+### 2026-08-24 (late) — Chat panel UX
+- **Interactive action badges**: hover for a rich link preview (favicon, title, Open Graph description/site/image — legit-check before visiting); click jumps to the exact tab that action opened; failed badges show errors inline
+- **Session history**: transcripts persisted to `cli/sessions/`; session picker below the harness dropdown (new / load / delete); restores messages, actions, and reasoning
+- `tab.read`/`tab.process` badges carry resolved URLs (success and failure) so every reference is previewable
+- Raised websocket frame limit to 50 MB; extension truncates oversized page HTML at 2 MiB (with truncation flag) — fixed `1009 message too big` disconnects on large pages
+- Fix: empty reply on tool-using turns — completion now keyed on session busy/idle, not the first assistant finish event
+
+### 2026-08-24 — Agentic loop hardening
+- **`chat.completed` guarantee**: exactly one completion signal per turn (ok/error/timeout/stopped) plus a hard turn timeout — the UI can never hang
+- **Stop button**: kills a running turn instantly, end to end (stop events through the chat handler, SSE wait loop, and OpenCode `/session/{id}/abort`); chat turns run as concurrent tasks so stop/pings are read mid-turn
+- **Multi-round work loop**: harnesses chain reads until the task is complete (max 16 rounds); browser events flush mid-loop (tab.new takes effect before the next round); failures feed back so the model can retry
+- **OpenCode SSE streaming**: `/event` subscription streams thinking + text deltas live into the panel; async prompts eliminate HTTP timeouts; tool permissions auto-approved; prompt forbids bash/curl for browser actions
+- **Structured logging** across every CLI subsystem with `--verbose`/`--debug` and env controls
+- MV3 keepalive (20s ping), protocol keepalive disabled, send serialization, graceful disconnects — long turns survive Chrome's worker suspension
+- Connection-state notifications in the panel; `setup.sh` one-command installer; absolute doc paths; repo folder renamed `CLI/` to `cli/`
+
+### 2026-08-24 (early) — Foundation
+- Chrome extension: form snapshots, bundled Pyodide in an offscreen document (CSP-safe), on-demand content-script injection, fill programs with pre-filled-field protection
+- CLI: plugin system (integrations / form adapters / harnesses), LLM providers, MCP servers, JSONC config with schema validation, websocket + stdio transports
+- Sidepanel chat (React + streamdown), harness action vocabulary (`tab.*`, `doc.create`), session tracking, event bus
+- Verified live against OpenCode (:4096), OpenClaw (:18789), Hermes (:9119)
