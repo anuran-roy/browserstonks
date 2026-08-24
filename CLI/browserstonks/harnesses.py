@@ -130,9 +130,9 @@ class BaseHarness:
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 raw = r.read().decode()
-                _h_log.info("%s server %s %s -> %d bytes (%.0fms)",
-                            self.name, method, path, len(raw),
-                            (_time.monotonic() - t0) * 1000)
+                _h_log.debug("%s server %s %s -> %d bytes (%.0fms)",
+                             self.name, method, path, len(raw),
+                             (_time.monotonic() - t0) * 1000)
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as e:
             detail = ""
@@ -255,10 +255,18 @@ class OpenCodeHarness(BaseHarness):
         sent: dict[int, int] = {}  # messageID -> chars already reported
         reply = ""
         reasoning = ""
+        polls = 0
+        last_size = -1
         while _t.monotonic() < deadline:
             _t.sleep(self.config.get("pollInterval", 1.0))
             msgs = self._http("GET", f"/session/{oc_session}/message",
                               timeout=30)
+            polls += 1
+            size = len(json.dumps(msgs))
+            if size != last_size:
+                _h_log.debug("poll %d: payload %d bytes (grew)" if size > last_size
+                             else "poll %d: payload %d bytes", polls, size)
+                last_size = size
             for m in msgs:
                 info = m.get("info", {})
                 if info.get("role") != "assistant":
@@ -269,8 +277,12 @@ class OpenCodeHarness(BaseHarness):
                     if ptype not in ("text", "reasoning") or not text:
                         continue
                     already = sent.get(id(p), 0)
-                    if len(text) > already and on_progress:
-                        on_progress({"type": ptype, "text": text[already:]})
+                    if len(text) > already:
+                        _h_log.info("%s streaming %s delta +%d chars (total %d)",
+                                    self.name, ptype, len(text) - already,
+                                    len(text))
+                        if on_progress:
+                            on_progress({"type": ptype, "text": text[already:]})
                         sent[id(p)] = len(text)
                 if info.get("id"):
                     parts_text = " ".join(
@@ -287,6 +299,7 @@ class OpenCodeHarness(BaseHarness):
                     raise HarnessError(
                         f"opencode agent error: {info.get('error', 'unknown')}")
             if reply:
+                _h_log.info("%s turn finished after %d poll(s)", self.name, polls)
                 return {"reply": reply, "actions": _extract_actions(reply),
                         "meta": {"mode": "server", "session": oc_session,
                                  "reasoning": reasoning[:2000]}}
