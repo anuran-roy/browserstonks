@@ -1,0 +1,2 @@
+"use client";
+import {A,f,c}from'./chunk-BO2N2NFS.js';import {useContext,useState,useEffect}from'react';import {jsx}from'react/jsx-runtime';var R=({code:s,language:e,raw:t,className:h,startLine:d,lineNumbers:m,...p})=>{let{shikiTheme:l}=useContext(A),o=f(),[a,i]=useState(t);return useEffect(()=>{if(!o){i(t);return}let r=o.highlight({code:s,language:e,themes:l},c=>{i(c);});r&&i(r);},[s,e,l,o,t]),jsx(c,{className:h,language:e,lineNumbers:m,result:a,startLine:d,...p})};export{R as HighlightedCodeBlockBody};
