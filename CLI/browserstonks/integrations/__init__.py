@@ -37,6 +37,16 @@ class BaseIntegration:
         """Route a client message: plan / chat / session.* / ping."""
         mtype = msg.get("type", "")
 
+        # tab HTML replies (fufilled by the extension asynchronously)
+        if mtype == "tab.read.response":
+            fut = self._read_futures.get(msg.get("requestId", ""))
+            if fut and not fut.done():
+                if msg.get("error"):
+                    fut.set_exception(RuntimeError(str(msg["error"])))
+                else:
+                    fut.set_result(msg.get("html", ""))
+            return None  # no response needed
+
         if mtype == "plan":
             dom = msg.get("dom", {})
             description = extract_site_adapter(dom).describe(dom)
@@ -98,12 +108,15 @@ class WebSocketIntegration(BaseIntegration):
                          tracker=tracker, bus=bus)
         self.host = host
         self.port = port
+        self._conn = None
+        self._read_futures: dict[str, asyncio.Future] = {}
 
     async def start(self) -> None:
         import websockets
 
         async def on_conn(ws):
             print(f"[ws] client connected: {ws.remote_address}", flush=True)
+            self._conn = ws
             try:
                 async for raw in ws:
                     try:
@@ -128,12 +141,29 @@ class WebSocketIntegration(BaseIntegration):
                         await ws.send(json.dumps(resp))
                         self._log_msg(msg, resp)
             finally:
+                self._conn = None
                 print(f"[ws] client disconnected: {ws.remote_address}", flush=True)
 
         async with websockets.serve(on_conn, self.host, self.port):
             print(f"[ws] BrowserStonks listening on ws://{self.host}:{self.port}",
                   flush=True)
             await asyncio.Future()  # run forever
+
+    async def request_tab_html(self, tab_id: int, timeout: float = 20) -> str:
+        """Ask the connected extension for a tab's HTML (tab.read support)."""
+        ws = self._conn
+        if ws is None:
+            raise RuntimeError("no browser connected")
+        rid = f"readhtml_{tab_id}_{id(self):x}"
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._read_futures[rid] = fut
+        await ws.send(json.dumps({
+            "type": "tab.read.request", "tabId": tab_id, "requestId": rid,
+        }))
+        try:
+            return await asyncio.wait_for(fut, timeout)
+        finally:
+            self._read_futures.pop(rid, None)
 
     @staticmethod
     def _log_msg(msg: dict, resp: dict) -> None:

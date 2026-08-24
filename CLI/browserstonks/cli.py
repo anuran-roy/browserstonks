@@ -183,10 +183,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
             continue
         cls = registry.integration(name)
         if name == "websocket":
-            enabled.append(cls(planner, chat_handler=chat,
-                               tracker=tracker, bus=bus,
-                               host=spec.get("host", "127.0.0.1"),
-                               port=int(spec.get("port", 8765))))
+            integration = cls(planner, chat_handler=chat,
+                              tracker=tracker, bus=bus,
+                              host=spec.get("host", "127.0.0.1"),
+                              port=int(spec.get("port", 8765)))
+            # wire the tab HTML reader for harness tab.read/tab.process
+            chat.tab_reader = integration.request_tab_html
+            enabled.append(integration)
         else:
             enabled.append(cls(planner, chat_handler=chat,
                                tracker=tracker, bus=bus))

@@ -80,6 +80,20 @@ function connect() {
         applyBrowserEvents(msg.events || []);
         return;
       }
+      if (msg.type === "tab.read.request") {
+        // CLI wants a tab's HTML (harness tab.read / tab.process actions)
+        chrome.tabs.sendMessage(msg.tabId, { type: "GET_TAB_HTML" })
+          .then((res) => ws.send(JSON.stringify({
+            type: "tab.read.response", requestId: msg.requestId,
+            html: res?.ok ? res.html : undefined,
+            error: res?.ok ? undefined : (res?.error || "content script unreachable"),
+          })))
+          .catch((e) => ws.send(JSON.stringify({
+            type: "tab.read.response", requestId: msg.requestId,
+            error: e.message,
+          })));
+        return;
+      }
       if (msg.type === "chat.response" || msg.type === "harnesses.list") {
         deliverChatReply(msg);
         return;
@@ -330,6 +344,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     chrome.tabs.sendMessage(msg.tabId, {
       type: "PAGE_CALL", op: msg.op, args: msg.args || [],
     }).then(sendResponse).catch((e) => sendResponse({ error: e.message }));
+    return true; // async response
+  }
+  // read a tab's HTML (for harness tab.read / tab.process actions)
+  if (msg.type === "READ_TAB_HTML") {
+    chrome.tabs.sendMessage(msg.tabId, { type: "GET_TAB_HTML" })
+      .then(sendResponse)
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true; // async response
   }
 });

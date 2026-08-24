@@ -207,6 +207,15 @@
       sendResponse({ ok: true });
       return;
     }
+    if (msg.type === "GET_TAB_HTML") {
+      // full page HTML for harness read/process actions (truncated server-side)
+      try {
+        sendResponse({ ok: true, html: document.documentElement.outerHTML });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) });
+      }
+      return;
+    }
     // ack probes (PING_CONTENT) and anything unknown so the caller never
     // sees "receiving end does not exist"
     sendResponse({ ok: true, pong: msg.type === "PING_CONTENT" });
