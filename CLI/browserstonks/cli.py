@@ -48,18 +48,24 @@ INIT_CONFIG = """\
   "docsDir": "docs",
   "harnesses": {
     // Agent harnesses used by the sidepanel chat. Local = CLI binary,
-    // server = HTTP endpoint. Uncomment the ones you have.
+    // server = HTTP endpoint. auth configures secure-server auth.
     "opencode": {
-      // "command": "opencode", "workdir": ".",
-      // server mode: "base_url": "http://127.0.0.1:4096", "token": "${OPENCODE_TOKEN}"
+      // server mode (verified protocol):
+      "base_url": "http://127.0.0.1:4096",
+      // "agent": "build",
+      // "model": { "providerID": "opencode", "modelID": "..." },
+      // "auth": { "type": "bearer", "token": "${OPENCODE_TOKEN}" }
+      // local mode instead: "command": "opencode", "workdir": "."
     },
     "openclaw": {
       // "command": "openclaw",
-      // "base_url": "http://127.0.0.1:5000"
+      // "base_url": "http://127.0.0.1:5000",
+      // "auth": { "type": "apikey", "token": "${OPENCLAW_API_KEY}", "header": "X-Api-Key" }
     },
     "hermes": {
       // "command": "hermes",
-      // "base_url": "http://127.0.0.1:8080"
+      // "base_url": "http://127.0.0.1:8080",
+      // "auth": { "type": "basic", "username": "${HERMES_USER}", "password": "${HERMES_PASS}" }
     }
   },
   "mcpServers": {

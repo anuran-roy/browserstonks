@@ -75,7 +75,36 @@
           "command": { "type": "string", "description": "Local binary (default: harness name)" },
           "workdir": { "type": "string" },
           "base_url": { "type": "string", "description": "Server mode HTTP endpoint" },
-          "token": { "type": "string", "description": "Bearer token for server mode" },
+          "agent": { "type": "string", "description": "opencode: agent id (build/plan/...)" },
+          "model": {
+            "type": "object",
+            "description": "opencode: {providerID, modelID} override",
+            "properties": {
+              "providerID": { "type": "string" },
+              "modelID": { "type": "string" }
+            }
+          },
+          "auth": {
+            "type": "object",
+            "description": "Authentication for server mode",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["bearer", "basic", "apikey", "none"],
+                "description": "Auth scheme (default: bearer if token set)"
+              },
+              "token": { "type": "string", "description": "Bearer/API-key value; use ${VAR} from .env" },
+              "username": { "type": "string", "description": "basic auth user" },
+              "password": { "type": "string", "description": "basic auth password" },
+              "header": { "type": "string", "description": "apikey: header name (default X-Api-Key)" },
+              "query": { "type": "string", "description": "apikey: query-param name to append to URLs" },
+              "headers": {
+                "type": "object",
+                "description": "Extra custom headers always sent",
+                "additionalProperties": { "type": "string" }
+              }
+            }
+          },
           "enabled": { "type": "boolean" }
         }
       }

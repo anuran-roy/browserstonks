@@ -75,12 +75,78 @@ class BaseHarness:
         """
         raise NotImplementedError
 
+    # -- shared HTTP helpers (server-mode harnesses) ---------------------------
+    def _headers(self) -> dict[str, str]:
+        """Auth headers from the harness's `auth` config block.
+
+        auth: {
+          "type": "bearer" | "basic" | "apikey" | "none",
+          "token": "${OPENCODE_TOKEN}",     # bearer / apikey value
+          "username": "...", "password": "...",   # basic
+          "header": "X-Api-Key",            # apikey header name
+          "query": "api_key",               # apikey query param name
+          "headers": {"X-Custom": "v"}      # extra headers, always sent
+        }
+        """
+        auth = self.config.get("auth") or {}
+        headers = {"Content-Type": "application/json"}
+        for k, v in (auth.get("headers") or {}).items():
+            headers[k] = v
+        atype = (auth.get("type") or ("bearer" if auth.get("token") else "none")).lower()
+        if atype == "bearer" and auth.get("token"):
+            headers["Authorization"] = f"Bearer {auth['token']}"
+        elif atype == "basic" and auth.get("username"):
+            import base64
+            cred = f"{auth['username']}:{auth.get('password', '')}"
+            headers["Authorization"] = "Basic " + base64.b64encode(cred.encode()).decode()
+        elif atype == "apikey" and auth.get("token"):
+            headers[auth.get("header", "X-Api-Key")] = auth["token"]
+        return headers
+
+    def _auth_query(self) -> str:
+        """apikey-as-query-param, appended to URLs when configured."""
+        auth = self.config.get("auth") or {}
+        if auth.get("query") and auth.get("token"):
+            import urllib.parse
+            return "?" + urllib.parse.urlencode({auth["query"]: auth["token"]})
+        return ""
+
+    def _http(self, method: str, path: str, body: dict | None = None,
+              timeout: int = 180) -> Any:
+        base = self.config["base_url"].rstrip("/")
+        req = urllib.request.Request(
+            f"{base}{path}{self._auth_query()}", method=method,
+            data=json.dumps(body).encode() if body is not None else None,
+            headers=self._headers(),
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                raw = r.read().decode()
+                return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as e:
+            detail = ""
+            try:
+                detail = e.read().decode()[:300]
+            except Exception:  # noqa: BLE001
+                pass
+            raise HarnessError(
+                f"{self.name} server {method} {path} -> {e.code}: {detail}") from e
+        except Exception as e:  # noqa: BLE001
+            raise HarnessError(f"{self.name} server error ({path}): {e}") from e
+
 
 # ----------------------------------------------------------------------------
 # OpenCode (local CLI subprocess or a server speaking its HTTP API)
 # ----------------------------------------------------------------------------
 class OpenCodeHarness(BaseHarness):
-    """OpenCode — local (`opencode` binary) or server (base_url + token)."""
+    """OpenCode — local (`opencode` binary) or server (base_url).
+
+    Server mode speaks the real OpenCode HTTP API (verified against
+    opencode 1.18.x on :4096):
+      POST /session                       -> {id, ...}
+      POST /session/{id}/message          -> {info, parts: [{type, text}]}
+      body: {parts: [{type: "text", text}], agent?, model?}
+    """
 
     name = "opencode"
     display_name = "OpenCode"
@@ -106,43 +172,46 @@ class OpenCodeHarness(BaseHarness):
             raise HarnessError(f"opencode exited {proc.returncode}: {proc.stderr[:500]}")
         return proc.stdout
 
-    def _http(self, method: str, path: str, body: dict | None = None) -> dict:
-        base = self.config["base_url"].rstrip("/")
-        token = self.config.get("token", "")
-        headers = {"Content-Type": "application/json"}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        req = urllib.request.Request(
-            f"{base}{path}", method=method,
-            data=json.dumps(body).encode() if body else None,
-            headers=headers,
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=120) as r:
-                return json.loads(r.read().decode() or "{}")
-        except Exception as e:  # noqa: BLE001
-            raise HarnessError(f"opencode server error ({path}): {e}") from e
-
     def start_session(self, session_id: str, context: dict[str, Any]) -> HarnessSession:
         sess = super().start_session(session_id, context)
         if self.mode == "server":
-            info = self._http("POST", "/session",
-                              {"title": f"browserstonks:{session_id}"})
+            info = self._http("POST", "/session", {})
             self.sessions[session_id] = info.get("id", session_id)
         else:
             self.sessions[session_id] = session_id
         return sess
+
+    def stop_session(self, session: HarnessSession) -> None:
+        if self.mode == "server":
+            oc_id = self.sessions.get(session.session_id)
+            if oc_id:
+                try:
+                    self._http("DELETE", f"/session/{oc_id}")
+                except HarnessError:
+                    pass
+        self.sessions.pop(session.session_id, None)
 
     def send(self, session: HarnessSession, message: str,
              context: dict[str, Any] | None = None) -> dict[str, Any]:
         oc_session = self.sessions.get(session.session_id, session.session_id)
         prompt = self._build_prompt(message, context)
         if self.mode == "server":
-            data = self._http("POST", "/session/chat", {
-                "id": oc_session, "message": {"role": "user", "parts": [{"type": "text", "text": prompt}]},
-            })
-            text = _extract_text(data)
-            return {"reply": text, "actions": _extract_actions(text), "meta": {"mode": "server"}}
+            body: dict[str, Any] = {
+                "parts": [{"type": "text", "text": prompt}],
+            }
+            agent = self.config.get("agent")
+            if agent:
+                body["agent"] = agent
+            model = self.config.get("model")
+            if model:
+                body["model"] = model
+            data = self._http("POST", f"/session/{oc_session}/message", body)
+            text = "\n".join(
+                p.get("text", "") for p in data.get("parts", [])
+                if p.get("type") == "text")
+            return {"reply": text, "actions": _extract_actions(text),
+                    "meta": {"mode": "server",
+                             "session": data.get("info", {}).get("id", oc_session)}}
         out = self._local(["run", "--session", oc_session, "--format", "text"], stdin=prompt)
         return {"reply": out, "actions": _extract_actions(out), "meta": {"mode": "local"}}
 
@@ -178,7 +247,8 @@ class OpenClawHarness(BaseHarness):
              context: dict[str, Any] | None = None) -> dict[str, Any]:
         prompt = OpenCodeHarness(self.config)._build_prompt(message, context)
         if self.mode == "server":
-            data = OpenCodeHarness(self.config)._http("POST", "/chat", {"message": prompt, "session": session.session_id})
+            data = self._http("POST", "/chat",
+                              {"message": prompt, "session": session.session_id})
             text = _extract_text(data)
         else:
             cmd = self.config.get("command", "openclaw")
@@ -213,7 +283,7 @@ class HermesHarness(BaseHarness):
              context: dict[str, Any] | None = None) -> dict[str, Any]:
         prompt = OpenCodeHarness(self.config)._build_prompt(message, context)
         if self.mode == "server":
-            data = OpenCodeHarness(self.config)._http("POST", "/v1/chat", {
+            data = self._http("POST", "/v1/chat", {
                 "message": prompt, "session": session.session_id})
             text = _extract_text(data)
         else:
