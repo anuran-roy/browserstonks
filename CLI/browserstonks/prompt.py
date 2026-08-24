@@ -39,8 +39,15 @@ Rules for actions:
 - For tab.close / tab.read / tab.process use the tab id from the browser
   session state below, or a distinctive URL substring.
 - You may combine normal markdown explanation with action lines.
-- After tab.read / tab.process you will receive the HTML or your code's
-  result as an ACTION RESULTS turn — analyze it and reply to the user.
+- WORK LOOP: you will receive tab.read / tab.process results as an ACTION
+  RESULTS turn. Keep emitting further actions (read other pages, process
+  HTML, open more tabs) until you have EVERYTHING you need for the task —
+  do not stop halfway and wait for the user. Only give your final answer
+  (no action lines) when the whole task is complete. Multi-step research
+  across many reads in one conversation turn is expected and supported.
+- If you emit tab.new/tab.open together with tab.read, the tab opens
+  first and the read result comes back in the ACTION RESULTS turn —
+  you can then read it again or continue with other pages.
 - Doc body: write the content in the fenced block; the filename should
   end in the matching extension (.html / .md / .txt).
 

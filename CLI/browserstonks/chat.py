@@ -76,7 +76,8 @@ class ChatHandler:
     def __init__(self, harness_manager: HarnessManager,
                  tracker: SessionTracker, bus: EventBus,
                  docs_dir: Path | None = None,
-                 tab_reader: Any = None) -> None:
+                 tab_reader: Any = None,
+                 max_rounds: int = 16) -> None:
         self.harnesses = harness_manager
         self.tracker = tracker
         self.bus = bus
@@ -86,6 +87,9 @@ class ChatHandler:
         # Set here OR injected later by serve() for integrations that
         # only become readable once started.
         self.tab_reader = tab_reader
+        # max read/process rounds per chat turn (long research tasks
+        # need many; the harness stops the loop when it stops asking)
+        self.max_rounds = max_rounds
 
     # ------------------------------------------------------------------ turn
     async def handle(self, msg: dict[str, Any], emit=None) -> dict[str, Any]:
@@ -126,7 +130,11 @@ class ChatHandler:
         reply_text = message
         applied_total: list[dict[str, Any]] = []
         result: dict[str, Any] = {}
-        for _round in range(4):
+        # multi-step work loop: keep executing read/process rounds until the
+        # harness stops requesting them (or the round limit is hit).
+        # Long research tasks legitimately need many rounds.
+        max_rounds = self.max_rounds
+        for _round in range(max_rounds):
             _chat_log.debug("harness round %d: sending %d chars",
                             _round + 1, len(reply_text))
             # run the (blocking) harness turn in a thread so the event loop
