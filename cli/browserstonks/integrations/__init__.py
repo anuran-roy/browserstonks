@@ -49,7 +49,12 @@ class BaseIntegration:
                 if msg.get("error"):
                     fut.set_exception(RuntimeError(str(msg["error"])))
                 else:
-                    fut.set_result(msg.get("html", ""))
+                    html = msg.get("html", "")
+                    if msg.get("truncated"):
+                        _ws_log.warning(
+                            "tab html truncated by the client (%d chars) — "
+                            "the harness sees partial content", len(html))
+                    fut.set_result(html)
             return None  # no response needed
 
         if mtype == "plan":
@@ -267,7 +272,10 @@ class WebSocketIntegration(BaseIntegration):
                 # ping every 20s). The library's protocol-level keepalive
                 # kills connections when Chrome suspends the MV3 worker
                 # (protocol pings don't reset that), so disable it.
-                ping_interval=None, ping_timeout=None):
+                ping_interval=None, ping_timeout=None,
+                # tab.read.response frames carry full page HTML — pages
+                # routinely exceed the default 1 MiB limit
+                max_size=50 * 1024 * 1024):
             _ws_log.info("listening on ws://%s:%s", self.host, self.port)
             await asyncio.Future()  # run forever
 

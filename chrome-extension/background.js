@@ -112,11 +112,23 @@ function connect() {
       if (msg.type === "tab.read.request") {
         // CLI wants a tab's HTML (harness tab.read / tab.process actions)
         chrome.tabs.sendMessage(msg.tabId, { type: "GET_TAB_HTML" })
-          .then((res) => ws.send(JSON.stringify({
-            type: "tab.read.response", requestId: msg.requestId,
-            html: res?.ok ? res.html : undefined,
-            error: res?.ok ? undefined : (res?.error || "content script unreachable"),
-          })))
+          .then((res) => {
+            // cap the frame: huge pages would blow up the websocket
+            // message size and kill the connection
+            const MAX_HTML = 2 * 1024 * 1024; // 2 MiB
+            let html = res?.ok ? res.html : undefined;
+            let truncated = false;
+            if (html && html.length > MAX_HTML) {
+              html = html.slice(0, MAX_HTML);
+              truncated = true;
+              log("tab.read html truncated to 2MiB (tab", msg.tabId + ")");
+            }
+            ws.send(JSON.stringify({
+              type: "tab.read.response", requestId: msg.requestId,
+              html, truncated,
+              error: res?.ok ? undefined : (res?.error || "content script unreachable"),
+            }));
+          })
           .catch((e) => ws.send(JSON.stringify({
             type: "tab.read.response", requestId: msg.requestId,
             error: e.message,
