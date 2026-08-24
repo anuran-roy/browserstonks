@@ -238,20 +238,19 @@
         width: 38px; height: 38px;
         background: linear-gradient(180deg, #4f46e5, #6366f1);
         color: #fff; border: 0; border-radius: 12px 0 0 12px;
-        cursor: grab; user-select: none; z-index: 2147483647;
+        cursor: pointer; user-select: none; z-index: 2147483647;
         box-shadow: -2px 2px 10px rgba(0,0,0,.25);
         display: flex; align-items: center; justify-content: center;
         padding: 5px; box-sizing: border-box;
         transition: filter .15s;
       }
       .btn:hover { filter: brightness(1.15); }
-      .btn.dragging { cursor: grabbing; filter: brightness(1.1); }
     `;
     shadow.appendChild(style);
 
     const btn = document.createElement("button");
     btn.className = "btn";
-    btn.title = "Click to open the BrowserStonks chat panel — drag to reposition";
+    btn.title = "Open the BrowserStonks chat panel";
     const logo = document.createElement("img");
     // web_accessible_resource — pages can load it from the extension
     logo.src = chrome.runtime.getURL("public/browserstonks-logo.png");
@@ -260,27 +259,8 @@
     btn.appendChild(logo);
     shadow.appendChild(btn);
 
-    // restore saved vertical position for this origin
-    const key = "bs-btn-top:" + location.origin;
-    try {
-      const saved = parseFloat(sessionStorage.getItem(key) || localStorage.getItem(key) || "");
-      if (!isNaN(saved)) btn.style.top = saved + "px";
-    } catch { /* storage may be blocked; default position is fine */ }
-
-    function clamp() {
-      const max = window.innerHeight - btn.offsetHeight - 8;
-      const cur = parseFloat(btn.style.top) || (window.innerHeight * 0.4);
-      btn.style.top = Math.max(8, Math.min(cur, max)) + "px";
-    }
-    clamp();
-    window.addEventListener("resize", clamp);
-
-    // click = plain pointer press (fires on pointerdown, while the user
-    // gesture is freshest — sidePanel.open needs it). drag = two-finger
-    // touch OR shift+drag with the mouse.
-    const activePointers = new Set();
-    let dragging = false, startY = 0, startTop = 0;
-
+    // click-only: fire on pointerdown (user gesture freshest —
+    // sidePanel.open needs it); no drag behaviour.
     function openPanel() {
       chrome.runtime.sendMessage({ type: "OPEN_CHAT_PANEL" })
         .then((r) => {
@@ -291,48 +271,7 @@
         .catch((e) => log("panel open failed (extension context?):", e));
     }
 
-    btn.addEventListener("pointerdown", (e) => {
-      activePointers.add(e.pointerId);
-      const twoFinger = activePointers.size >= 2;
-      if (twoFinger || e.shiftKey) {
-        // DRAG mode begins: capture this pointer and start moving
-        dragging = true;
-        startY = e.clientY;
-        startTop = parseFloat(btn.style.top) || (window.innerHeight * 0.4);
-        btn.setPointerCapture(e.pointerId);
-        btn.classList.add("dragging");
-        e.preventDefault();
-      } else if (activePointers.size === 1 && !dragging) {
-        // plain single click with no modifier: open the panel NOW
-        // (pointerdown keeps the user gesture alive for the background)
-        openPanel();
-      }
-    });
-    btn.addEventListener("pointermove", (e) => {
-      if (!dragging) return;
-      const dy = e.clientY - startY;
-      const max = window.innerHeight - btn.offsetHeight - 8;
-      btn.style.top = Math.max(8, Math.min(startTop + dy, max)) + "px";
-    });
-    function endDrag(e) {
-      activePointers.delete(e.pointerId);
-      if (!dragging) return;
-      if (activePointers.size === 0) {
-        dragging = false;
-        btn.classList.remove("dragging");
-        // persist position
-        try {
-          localStorage.setItem(key, btn.style.top);
-          sessionStorage.setItem(key, btn.style.top);
-        } catch { /* ignore */ }
-      }
-    }
-    btn.addEventListener("pointerup", endDrag);
-    btn.addEventListener("pointercancel", endDrag);
-
-    // track a second finger landing anywhere on the button (touches arrive
-    // as separate pointerdown events — already handled above); when the
-    // FIRST (non-drag) pointer lifts while a second is held, do nothing.
+    btn.addEventListener("pointerdown", () => openPanel());
 
     document.documentElement.appendChild(host);
     log("panel button mounted (right edge)");
