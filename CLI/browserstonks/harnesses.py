@@ -359,12 +359,25 @@ class OpenCodeHarness(BaseHarness):
         use_sse = self._ensure_sse()
         queue = self._subscribe(oc_session) if use_sse else None
         try:
+            # Snapshot messages existing BEFORE our prompt: only NEW
+            # assistant messages are this turn's output. Without this,
+            # later turns immediately "finish" with the previous reply.
+            known_ids = set()
+            try:
+                for m in self._http(
+                        "GET", f"/session/{oc_session}/message", timeout=30):
+                    known_ids.add(m.get("info", {}).get("id"))
+            except HarnessError:
+                pass
+
             # 204 immediately; the agent works in the background
             self._http("POST", f"/session/{oc_session}/prompt_async", body,
                        timeout=30)
 
             deadline = _t.monotonic() + self.config.get("turnTimeout", 600)
             sent: dict[str, int] = {}
+            assistant_ids: set = set()  # NEW assistant message ids this turn
+            user_ids: set = set()       # the new user message(s) — echo guard
             reply = ""
             reasoning = ""
             while _t.monotonic() < deadline:
@@ -379,17 +392,29 @@ class OpenCodeHarness(BaseHarness):
                     # still make progress even if events were missed
                     msgs = self._http("GET", f"/session/{oc_session}/message",
                                       timeout=30)
-                    new = self._scan_messages(msgs, sent, on_progress)
+                    new = self._scan_messages(msgs, known_ids, assistant_ids,
+                                              sent, on_progress)
                     reply, reasoning = new if new else (reply, reasoning)
                 else:
                     etype = ev.get("type", "")
                     props = ev.get("properties", {}) or {}
                     if etype == "message.part.updated":
                         part = props.get("part", {})
-                        self._emit_part(part, sent, on_progress)
+                        # only stream parts of NEW assistant messages —
+                        # the user prompt echo (and old messages) must not
+                        # appear as model output
+                        if (part.get("messageID") not in known_ids
+                                and part.get("messageID") not in user_ids):
+                            self._emit_part(part, sent, on_progress)
                     elif etype == "message.updated":
                         info = props.get("info", {})
-                        if info.get("role") == "assistant":
+                        mid = info.get("id")
+                        if mid in known_ids:
+                            continue
+                        if info.get("role") == "user":
+                            user_ids.add(mid)
+                        elif info.get("role") == "assistant":
+                            assistant_ids.add(mid)
                             if info.get("finish") == "error":
                                 raise HarnessError(
                                     f"opencode agent error: "
@@ -399,7 +424,9 @@ class OpenCodeHarness(BaseHarness):
                                 msgs = self._http(
                                     "GET", f"/session/{oc_session}/message",
                                     timeout=30)
-                                new = self._scan_messages(msgs, sent, on_progress)
+                                new = self._scan_messages(
+                                    msgs, known_ids, assistant_ids,
+                                    sent, on_progress)
                                 reply, reasoning = new if new else (reply, reasoning)
                 if reply:
                     _h_log.info("opencode turn finished via %s",
@@ -428,13 +455,19 @@ class OpenCodeHarness(BaseHarness):
                 on_progress({"type": ptype, "text": text[already:]})
             sent[pid] = len(text)
 
-    def _scan_messages(self, msgs: list, sent: dict, on_progress):
-        """Polling fallback: scan messages for parts + final reply."""
+    def _scan_messages(self, msgs: list, known_ids: set,
+                       assistant_ids: set, sent: dict, on_progress):
+        """Scan messages: stream parts of NEW assistant messages, return the
+        final reply once one of them has finish=stop."""
         reply, reasoning = "", ""
         for m in msgs:
             info = m.get("info", {})
+            mid = info.get("id")
+            if mid in known_ids:
+                continue  # pre-turn message — not ours
             if info.get("role") != "assistant":
-                continue
+                continue  # user echo and others — never model output
+            assistant_ids.add(mid)
             for p in m.get("parts", []):
                 self._emit_part(p, sent, on_progress)
             if info.get("finish") == "error":

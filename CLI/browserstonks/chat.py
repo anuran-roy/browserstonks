@@ -98,20 +98,24 @@ class ChatHandler:
             return {"type": "chat.response", "error": "empty message"}
 
         request_id = msg.get("requestId")
+        # capture the event loop here (we're ON it) so the sync on_progress
+        # callback — invoked from harness SSE/subprocess threads — can
+        # schedule emits back onto this loop.
+        import asyncio as _aio
+        _loop = _aio.get_running_loop()
 
         def on_progress(delta: dict) -> None:
-            """Sync callback from harnesses; schedule the async emit."""
+            """Sync callback from harness threads; schedule the async emit."""
             if emit is None:
                 return
             try:
-                import asyncio as _a
                 ev = {"type": "chat.progress", "requestId": request_id,
                       "harness": harness,
                       "partType": delta.get("type", "text"),
                       "text": delta.get("text", "")}
-                _a.get_running_loop().create_task(_maybe_await(emit(ev)))
+                _aio.run_coroutine_threadsafe(_maybe_await(emit(ev)), _loop)
             except RuntimeError:
-                pass  # no running loop (sync callers) — skip progress
+                pass  # loop closed — skip progress
             except Exception:  # noqa: BLE001 - never let progress kill a turn
                 pass
 
@@ -124,8 +128,13 @@ class ChatHandler:
         for _round in range(4):
             _chat_log.debug("harness round %d: sending %d chars",
                             _round + 1, len(reply_text))
-            result = self.harnesses.chat(harness, reply_text, session_id,
-                                         context, on_progress=on_progress)
+            # run the (blocking) harness turn in a thread so the event loop
+            # stays free to deliver chat.progress emits scheduled from it
+            import asyncio as _aio
+            result = await _aio.get_running_loop().run_in_executor(
+                None,
+                lambda: self.harnesses.chat(harness, reply_text, session_id,
+                                            context, on_progress=on_progress))
             reply_text = ""
             actions = result.get("actions", [])
             if not any(a["op"] in ("tab.read", "tab.process") for a in actions):
