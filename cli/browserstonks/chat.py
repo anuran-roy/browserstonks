@@ -90,12 +90,42 @@ class ChatHandler:
         # max read/process rounds per chat turn (long research tasks
         # need many; the harness stops the loop when it stops asking)
         self.max_rounds = max_rounds
+        # stop flag for in-flight turns (user pressed Stop in the panel)
+        import threading as _th
+        self._stop_events: dict[tuple, "_th.Event"] = {}
 
     # ------------------------------------------------------------------ turn
     async def handle(self, msg: dict[str, Any], emit=None) -> dict[str, Any]:
         """emit: optional async callable(dict) receiving live progress events
         ({type: "chat.progress", requestId, partType, text}) so the chat
         panel can show the model thinking while it works."""
+        harness = msg.get("harness", "opencode")
+        session_id = msg.get("sessionId", "primary")
+        import threading as _threading
+        stop_event = _threading.Event()
+        self._stop_events[(harness, session_id)] = stop_event
+        try:
+            return await self._handle_inner(msg, emit, stop_event)
+        finally:
+            self._stop_events.pop((harness, session_id), None)
+
+    def stop(self, harness: str, session_id: str) -> bool:
+        """Stop an in-flight turn (user pressed Stop). Returns True if a
+        turn was running and got signalled."""
+        ev = self._stop_events.get((harness, session_id))
+        if ev is None:
+            return False
+        ev.set()
+        # also abort the harness-side run (e.g. OpenCode session abort)
+        try:
+            self.harnesses.abort(harness, session_id)
+        except Exception as e:  # noqa: BLE001
+            _chat_log.warning("harness abort failed: %s", e)
+        _chat_log.info("stop signalled for %s/%s", harness, session_id)
+        return True
+
+    async def _handle_inner(self, msg: dict[str, Any], emit,
+                            stop_event) -> dict[str, Any]:
         harness = msg.get("harness", "opencode")
         session_id = msg.get("sessionId", "primary")
         message = (msg.get("message") or "").strip()
@@ -135,16 +165,30 @@ class ChatHandler:
         # Long research tasks legitimately need many rounds.
         max_rounds = self.max_rounds
         for _round in range(max_rounds):
+            if stop_event.is_set():
+                _chat_log.info("turn stopped by user before round %d",
+                               _round + 1)
+                return {"type": "chat.response", "harness": harness,
+                        "reply": "⏹ Stopped by user.",
+                        "actionsApplied": applied_total,
+                        "events": self.bus.drain(), "meta": {"stopped": True}}
             _chat_log.debug("harness round %d: sending %d chars",
                             _round + 1, len(reply_text))
             # run the (blocking) harness turn in a thread so the event loop
-            # stays free to deliver chat.progress emits scheduled from it
+            # stays free to deliver chat.progress emits and chat.stop
             import asyncio as _aio
             result = await _aio.get_running_loop().run_in_executor(
                 None,
-                lambda: self.harnesses.chat(harness, reply_text, session_id,
-                                            context, on_progress=on_progress))
+                lambda: self.harnesses.chat(
+                    harness, reply_text, session_id, context,
+                    on_progress=on_progress, stop_event=stop_event))
             reply_text = ""
+            if stop_event.is_set():
+                _chat_log.info("turn stopped by user mid-round %d", _round + 1)
+                return {"type": "chat.response", "harness": harness,
+                        "reply": "⏹ Stopped by user.",
+                        "actionsApplied": applied_total,
+                        "events": self.bus.drain(), "meta": {"stopped": True}}
             actions = result.get("actions", [])
             if not any(a["op"] in ("tab.read", "tab.process") for a in actions):
                 break

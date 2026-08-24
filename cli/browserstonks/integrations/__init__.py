@@ -62,6 +62,11 @@ class BaseIntegration:
             plan["tabId"] = msg.get("tabId") or dom.get("tabId")
             return plan
 
+        if mtype == "chat.stop" and self.chat_handler is not None:
+            stopped = self.chat_handler.stop(
+                msg.get("harness", "opencode"), msg.get("sessionId", "primary"))
+            return {"type": "chat.stop.ack", "stopped": stopped}
+
         if mtype == "chat" and self.chat_handler is not None:
             async def _emit(ev: dict) -> None:
                 await self._send(ev)
@@ -123,6 +128,7 @@ class WebSocketIntegration(BaseIntegration):
         # send() calls from different tasks (progress emits from executor
         # threads race with dispatch replies otherwise)
         self._send_lock = asyncio.Lock()
+        self._inflight: dict = {}  # requestId -> chat task
 
     async def _send(self, payload: dict) -> None:
         ws = self._conn
@@ -137,12 +143,55 @@ class WebSocketIntegration(BaseIntegration):
         async def on_conn(ws):
             _ws_log.info("client connected %s", ws.remote_address)
             self._conn = ws
+            self._inflight = {}
+
+            async def _finish_chat(request_id: str, resp: dict | None) -> None:
+                self._inflight.pop(request_id, None)
+                if resp is None:
+                    return
+                if isinstance(resp, dict):
+                    resp.setdefault("sender", "chrome-extension")
+                    if request_id is not None:
+                        resp.setdefault("requestId", request_id)
+                try:
+                    await self._send(resp)
+                except Exception:  # noqa: BLE001 - client vanished
+                    _ws_log.info("client went away mid-reply %s",
+                                 ws.remote_address)
+                self._log_msg({"type": "chat", "requestId": request_id}, resp)
+
+            async def _run_chat(msg: dict) -> None:
+                request_id = msg.get("requestId")
+                try:
+                    resp = await self.dispatch(msg)
+                except Exception as e:  # noqa: BLE001
+                    import traceback
+                    traceback.print_exc()
+                    resp = {"error": f"handler failed: {e}",
+                            "requestId": request_id}
+                await _finish_chat(request_id, resp)
+
             try:
                 async for raw in ws:
                     try:
                         msg = json.loads(raw)
                     except json.JSONDecodeError:
                         await self._send({"error": "bad json"})
+                        continue
+                    mtype = msg.get("type", "")
+                    if mtype == "chat" and self.chat_handler is not None:
+                        # chat turns run concurrently; replies sent when done
+                        rid = msg.get("requestId") or f"anon{id(msg):x}"
+                        self._inflight[rid] = asyncio.create_task(
+                            _run_chat(msg))
+                        continue
+                    if mtype == "chat.stop" and self.chat_handler is not None:
+                        stopped = self.chat_handler.stop(
+                            msg.get("harness", "opencode"),
+                            msg.get("sessionId", "primary"))
+                        await self._send({"type": "chat.stop.ack",
+                                          "stopped": stopped,
+                                          "requestId": msg.get("requestId")})
                         continue
                     try:
                         resp = await self.dispatch(msg)

@@ -373,6 +373,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     pendingChatReplies.set(requestId, sendResponse);
     return true;
   }
+  if (msg.type === "CHAT_STOP") {
+    // user pressed Stop: abort the in-flight harness turn on the CLI
+    send({
+      type: "chat.stop", harness: msg.harness, sessionId: msg.sessionId,
+      requestId: "stop_" + (++msgIdSeq.n), sender: "chrome-extension",
+    });
+    sendResponse({ stopping: true });
+    return;
+  }
   if (msg.type === "HARNESSES_LIST") {
     send({ type: "harnesses.list", requestId: "hl_" + (++msgIdSeq.n) });
     pendingChatReplies.set("hl_" + msgIdSeq.n, sendResponse);

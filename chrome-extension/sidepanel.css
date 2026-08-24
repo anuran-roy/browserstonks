@@ -75,3 +75,5 @@ footer textarea { flex: 1; resize: none; background: var(--bg); color: var(--tex
 footer button { background: var(--accent); color: #fff; border: 0; border-radius: 8px;
   padding: 0 16px; font-weight: 600; cursor: pointer; }
 footer button:disabled { opacity: 0.5; cursor: default; }
+footer button.stop-btn { background: #dc2626; }
+footer button.stop-btn:disabled { background: #7f1d1d; }

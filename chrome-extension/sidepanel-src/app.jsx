@@ -15,6 +15,7 @@ function App() {
   const [sessionId] = useState(() => "sp-" + Date.now().toString(36));
   const [connected, setConnected] = useState(false);
   const [progress, setProgress] = useState(null); // {text, reasoning, ts}
+  const [stopping, setStopping] = useState(false);
   const listRef = useRef(null);
   const progressRef = useRef({ text: "", reasoning: "" });
 
@@ -67,6 +68,20 @@ function App() {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages, busy, progress]);
 
+  async function stop() {
+    if (!busy) return;
+    setStopping(true);
+    try {
+      await chrome.runtime.sendMessage({
+        type: "CHAT_STOP", harness, sessionId,
+      });
+      // safety: if no response arrives within 10s, unblock the UI anyway
+      setTimeout(() => { setStopping(false); }, 10000);
+    } catch (e) {
+      setStopping(false);
+    }
+  }
+
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
@@ -93,6 +108,7 @@ function App() {
       setMessages((m) => [...m, { role: "assistant", content: `⚠️ ${e.message}`, error: true }]);
     } finally {
       setBusy(false);
+      setStopping(false);
       setProgress(null);
       refresh();
     }
@@ -167,7 +183,13 @@ function App() {
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
           }}
         />
-        <button onClick={send} disabled={busy || !input.trim()}>Send</button>
+        {busy
+          ? <button className="stop-btn" onClick={stop}
+                    disabled={stopping}
+                    title="Stop the running response">
+              {stopping ? "Stopping…" : "■ Stop"}
+            </button>
+          : <button onClick={send} disabled={!input.trim()}>Send</button>}
       </footer>
     </div>
   );

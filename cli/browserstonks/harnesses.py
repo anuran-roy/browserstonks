@@ -224,18 +224,28 @@ class OpenCodeHarness(BaseHarness):
             oc_id = self.sessions.get(session.session_id)
             if oc_id:
                 try:
-                    self._http("DELETE", f"/session/{oc_id}")
+                    self._http("POST", f"/session/{oc_id}/abort", {},
+                               timeout=15)
                 except HarnessError:
                     pass
         self.sessions.pop(session.session_id, None)
 
+    def abort_session(self, oc_session: str) -> None:
+        """Abort any in-flight run on the opencode session (user pressed Stop)."""
+        try:
+            self._http("POST", f"/session/{oc_session}/abort", {}, timeout=15)
+            _h_log.info("opencode turn aborted by user (%s)", oc_session)
+        except HarnessError as e:
+            _h_log.warning("opencode abort failed: %s", e)
+
     def send(self, session: HarnessSession, message: str,
              context: dict[str, Any] | None = None,
-             on_progress=None) -> dict[str, Any]:
+             on_progress=None, stop_event=None) -> dict[str, Any]:
         oc_session = self.sessions.get(session.session_id, session.session_id)
         prompt = _shared_prompt(self.config, message, context)
         if self.mode == "server":
-            return self._send_server(oc_session, prompt, on_progress)
+            return self._send_server(oc_session, prompt, on_progress,
+                                     stop_event)
         out = self._local(
             [oc_session, prompt],
             stdin=None, timeout=self.config.get("timeout", 300))
@@ -341,10 +351,13 @@ class OpenCodeHarness(BaseHarness):
             except ValueError:
                 pass
 
-    def _send_server(self, oc_session: str, prompt: str, on_progress) -> dict[str, Any]:
+    def _send_server(self, oc_session: str, prompt: str, on_progress,
+                     stop_event=None) -> dict[str, Any]:
         """Async prompt + live SSE streaming (no polling).
 
         Falls back to polling when the SSE stream can't be established.
+        stop_event breaks the wait loop immediately when the user presses
+        Stop; the harness-side run is aborted separately (abort_session).
         """
         import time as _t
 
@@ -394,6 +407,10 @@ class OpenCodeHarness(BaseHarness):
                     return True  # can't tell — assume still working
 
             while _t.monotonic() < deadline:
+                if stop_event is not None and stop_event.is_set():
+                    _h_log.info("opencode wait loop aborted by user stop")
+                    return {"reply": "", "actions": [],
+                            "meta": {"stopped": True, "session": oc_session}}
                 ev = None
                 if queue is not None:
                     try:
@@ -696,11 +713,14 @@ class HarnessManager:
 
     def chat(self, harness: str, message: str, session_id: str = "primary",
              context: dict[str, Any] | None = None,
-             on_progress=None) -> dict[str, Any]:
+             on_progress=None, stop_event=None) -> dict[str, Any]:
         """One agentic turn; returns the harness response dict.
 
         on_progress (optional) is forwarded to harnesses that stream
         ({"type": "text"|"reasoning", "text": delta} per call).
+        stop_event (optional threading.Event) aborts the wait loop promptly
+        when the user presses Stop (the harness-side run is aborted by
+        ChatHandler.stop separately).
         """
         h = self._harness(harness)
         live = self.sessions.setdefault(harness, {})
@@ -712,17 +732,33 @@ class HarnessManager:
         try:
             send = h.send
             import inspect as _inspect
-            if (on_progress is not None
-                    and "on_progress" in _inspect.signature(send).parameters):
-                result = send(sess, message, context, on_progress=on_progress)
-            else:
-                result = send(sess, message, context)
+            params = _inspect.signature(send).parameters
+            kwargs = {}
+            if on_progress is not None and "on_progress" in params:
+                kwargs["on_progress"] = on_progress
+            if stop_event is not None and "stop_event" in params:
+                kwargs["stop_event"] = stop_event
+            result = send(sess, message, context, **kwargs)
         except HarnessError as e:
             _h_log.error("%s/%s turn failed: %s", harness, session_id, e)
             return {"reply": f"⚠️ harness error: {e}", "actions": [], "meta": {"error": str(e)}}
         sess.record("assistant", result.get("reply", ""))
         result.setdefault("session", {"harness": harness, "id": session_id})
         return result
+
+    def abort(self, harness: str, session_id: str = "primary") -> None:
+        """Abort any in-flight run for a harness session (user Stop button)."""
+        h = self._harness(harness)
+        abort = getattr(h, "abort_session", None)
+        live = self.sessions.get(harness, {})
+        sess = live.get(session_id)
+        if abort is not None and sess is not None:
+            # harnesses that map to remote sessions abort them; local-mode
+            # harnesses have nothing to abort (subprocesses die on timeout)
+            h.stop_session(sess)
+            _h_log.info("aborted %s/%s session", harness, session_id)
+            # session ended — drop it so the next chat starts fresh
+            live.pop(session_id, None)
 
     def stop_all(self) -> None:
         for name, live in self.sessions.items():
