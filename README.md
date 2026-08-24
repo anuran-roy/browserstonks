@@ -50,6 +50,8 @@ What began as form-filling automation is now a general browser-agent platform: t
 - **Live model thinking** — the model's reasoning stream renders in the panel while it works (💭 thinking); the final message keeps a collapsible full-reasoning section
 - **Stop button** — terminate any running turn instantly (aborts the harness-side run too, e.g. OpenCode session abort); hung responses can't freeze the UI (guaranteed `chat.completed` signal + hard turn timeout + client safety nets)
 - **Session history** — every conversation is persisted under `cli/sessions/`; a picker below the harness dropdown lists saved sessions (title + message count), restores transcripts, and continues where you left off
+- **Session auto-restore** — closing the sidepanel with a chat open and reopening it resumes that exact conversation (active session + harness remembered in localStorage; transcript reloaded from the CLI store)
+- **Floating panel button** — a BrowserStonks logo button hugs the right edge of every page; one click opens the chat panel from any webpage (no toolbar needed), with a popup-window fallback when Chrome blocks the side-panel gesture
 - **Multi-round work loop** — harnesses chain `tab.read`/`tab.process` actions until the whole task is done (open → read → analyze → more reads → final report), without needing "Continue" prompts
 
 ### Reading & processing pages (the harness's eyes)
@@ -205,6 +207,11 @@ cli/                     Python CLI
 - [x] OpenClaw gateway verified at transport level; Hermes is CLI-driven (provider-limited).
 
 ## Changelog
+
+### 2026-08-25 (later) — Panel access & session continuity
+- **Floating panel button**: BrowserStonks-logo button on the right edge of every page; click opens the chat sidepanel from any webpage (popup-window fallback when Chrome 127+ blocks content-script `sidePanel.open` gestures); drag behaviour deferred
+- **Session auto-restore**: the sidepanel reopens into the last active chat session — active session id + harness persisted in localStorage, transcript reloaded from the CLI session store; deleting the active session starts fresh
+- Fix: `OPEN_CHAT_PANEL` handler crashed on an undefined `sender` (renamed listener parameter) — the floating button's click never opened the panel
 
 ### 2026-08-25 — Secure internet mode and content publishing
 - **Connection-token auth**: `browserstonks tokens issue/revoke/list`; SHA-256-hashed tokens in SQLite (default) / Postgres / Mongo; websocket auth gate (`auth.required`) closes unauthenticated connections; extension **Secure auth** checkbox + token field in the popup

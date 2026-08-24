@@ -115,6 +115,15 @@ config values support `${VAR}` expansion from the environment.
 Any harness via the `browserstonks_harnesses` plugin group; streaming
 harnesses implement `send(..., on_progress=…)`.
 
+## Sessions & persistence
+
+- Chat transcripts persist per session under `sessions/` (JSON, one file
+  per session: messages, actions, reasoning, title = first user message).
+- `sessions.list` / `session.load` / `session.delete` over the websocket.
+- The sidepanel remembers its last active session (localStorage pointer)
+  and reloads the transcript when reopened — conversations survive panel
+  close/reopen and browser restarts.
+
 ## Adding integrations / plugins
 
 Any Python package exposing `browserstonks_integrations` (a dict of

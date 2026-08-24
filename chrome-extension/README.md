@@ -16,6 +16,12 @@ First integration for the BrowserStonks CLI: it turns Chromium into an
    through the user's browser, run Python over it, and create docs via
    emitted browser events. Long turns stream the model's reasoning live
    (💭 thinking), and connection drops/reconnects show inline in the chat.
+   Reopening the panel resumes the last active chat session
+   (localStorage pointer + transcript reload from the CLI store).
+5. Shows a floating BrowserStonks-logo button on the right edge of every
+   page — one click opens the chat panel from any webpage (no toolbar
+   needed); falls back to a popup window when Chrome blocks the
+   side-panel gesture.
 5. Reports browser sessions (windows / tabs / profiles) to the CLI so
    harnesses always see coherent browser state; CLI-emitted events
    (`tab.new`, `tab.close`, `doc.open`) are applied in real time.
