@@ -82,7 +82,7 @@
     },
     "docsDir": {
       "type": "string",
-      "description": "Directory (relative to config root) where chat-created docs are written"
+      "description": "Base directory (config root); generated content is written under media/<sessionId>/ next to it. Kept for compatibility."
     },
     "harnesses": {
       "type": "object",

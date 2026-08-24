@@ -23,6 +23,22 @@
   },
   "answersFile": "answers.jsonc",
   "docsDir": "docs",
+  // generated content (doc.create) is written to media/<sessionId>/;
+  // when storage.enabled, it is ALSO uploaded to managed storage and
+  // the doc.open event points at the served URL.
+  // provider: cloudinary (default) | s3 | gcs — credentials in .env
+  "storage": {
+    "enabled": false,
+    "provider": "cloudinary"
+  },
+  // secure internet mode: when required, every websocket client must
+  // send {"type":"auth","token":"…"} as its first message. Issue tokens
+  // with `browserstonks tokens issue --label <name>`.
+  // database: default sqlite (tokens.db); also accepts
+  // postgres://… or mongodb://… DSNs (driver optional).
+  "auth": {
+    "required": false
+  },
   "harnesses": {
     "opencode": {
       "base_url": "http://127.0.0.1:4096"
