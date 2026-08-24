@@ -1,13 +1,20 @@
 # BrowserStonks Chrome Extension
 
-First integration for the BrowserStonks CLI. It:
+First integration for the BrowserStonks CLI: it turns Chromium into an
+**agentic browser**. It:
 
 1. Snapshots the current page's form DOM state (labels, types, options,
    selectors — understands Google Forms, Typeform, and plain HTML forms).
 2. Sends the snapshot to the CLI over WebSocket (`ws://127.0.0.1:8765`).
 3. Receives a Python program + values, loads **Pyodide** (CPython compiled
-   to WebAssembly) into the page, and executes `fill(page, VALUES)` where
-   `page` is a helper bound to the live DOM (set / click / select / submit).
+   to WebAssembly) into an offscreen document, and executes
+   `fill(page, VALUES)` where `page` is a helper bound to the live DOM
+   (set / click / select / submit).
+4. Hosts a sidepanel chat (React + Vercel streamdown) wired to agent
+   harnesses via the CLI — harnesses can open tabs, browse, and create
+   docs through emitted browser events.
+5. Reports browser sessions (windows / tabs / profiles) to the CLI so
+   harnesses always see coherent browser state.
 
 ## Install (Chrome, dev mode)
 

@@ -269,7 +269,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="browserstonks",
-        description="LLM-powered form-filling automation CLI",
+        description="Agentic-browser CLI: form filling, browser session "
+                    "tracking, and agent-harness chat for Chromium clients",
     )
     ap.add_argument("--version", action="version", version=__version__)
     ap.add_argument("--root", default=str(ROOT),
