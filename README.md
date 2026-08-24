@@ -1,20 +1,14 @@
 # BrowserStonks
 
-Turn any Chromium-based browser into an **agentic browser** — a Chrome
-extension + CLI system where AI agent harnesses can see the browser
-(form detection, tab/window/profile session tracking), act on it
-(fill forms, open tabs, create docs), and chat with you from a sidepanel.
+Turn any Chromium-based browser into an **agentic browser** — a Chrome extension + CLI system where AI agent harnesses can see the browser (form detection, tab/window/profile session tracking), act on it (fill forms, open tabs, create docs), and chat with you from a sidepanel.
 
-What began as form-filling automation is now a general browser-agent
-platform: the Chrome extension is the *first* integration for the CLI,
-and the CLI is the pluggable brain (LLMs, agent harnesses, MCP tools)
-behind any browser client.
+What began as form-filling automation is now a general browser-agent platform: the Chrome extension is the *first* integration for the CLI, and the CLI is the pluggable brain (LLMs, agent harnesses, MCP tools) behind any browser client.
 
 ## Architecture
 
 ```
 ┌──────────────────────── Chromium browser ────────────────────────┐
-│  extension: content script      background service worker       │
+│  extension: content script      background service worker        │
 │    DOM/form snapshots  ────────►  WebSocket ⇄ CLI                │
 │    page ops (set/click/…)        sidepanel chat (streamdown UI)  │
 │                                  offscreen doc: Pyodide (WASM)   │
@@ -30,21 +24,16 @@ behind any browser client.
 │  harnesses: OpenCode, OpenClaw, Hermes (+ plugin harnesses)     │
 │  LLM providers: OpenRouter, OpenAI, Anthropic, offline          │
 │  MCP servers: custom Model Context Protocol tools (stdio RPC)   │
-└──────────────────────────────────────────────────────────────────┘
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Features
 
 ### Agentic form filling
-- Detect forms on any page (generic HTML; plug-n-play adapters for
-  Google Forms, Typeform, and more via the plugin system)
-- Snapshot labels, types, options, selectors, and *existing values* —
-  pre-filled fields are never overwritten
+- Detect forms on any page (generic HTML; plug-n-play adapters for Google Forms, Typeform, and more via the plugin system)
+- Snapshot labels, types, options, selectors, and *existing values* — pre-filled fields are never overwritten
 - Answers resolved per field: rulebook (`answers.jsonc`) → LLM → mock
-- The CLI writes a small **Python program** per form; the extension
-  executes it in **Pyodide** (CPython compiled to WebAssembly) in an
-  offscreen document and applies `page.set/click/select/submit` against
-  the live DOM
+- The CLI writes a small **Python program** per form; the extension executes it in **Pyodide** (CPython compiled to WebAssembly) in an offscreen document and applies `page.set/click/select/submit` against the live DOM
 
 ### Sidepanel chat (agent harnesses)
 - React + **Vercel streamdown** chat UI (bundled, CSP-safe, no CDN)
@@ -55,49 +44,35 @@ behind any browser client.
   - any other harness via the `browserstonks_harnesses` plugin group
 - Harnesses reply in markdown and can emit actions:
   `[[tab.new|https://…]]`, `[[doc.create|markdown|notes.md]]`, …
-- The CLI applies actions: opens/closes real tabs, writes HTML/markdown/
-  text docs to `docs/` and opens them
+- The CLI applies actions: opens/closes real tabs, writes HTML/markdown/text docs to `docs/` and opens them
 
 ### Browser session awareness
-- The extension reports a full session snapshot on connect and deltas
-  on every tab/window change
-- The CLI keeps a coherent model: profiles → windows → tabs (url, title,
-  active) — queryable via `session.snapshot`, fed to harness prompts
-- CLI-emitted events (`tab.new`, `tab.open`, `tab.close`, `doc.open`)
-  are applied by the extension in real time
+- The extension reports a full session snapshot on connect and deltas on every tab/window change
+- The CLI keeps a coherent model: profiles → windows → tabs (url, title, active) — queryable via `session.snapshot`, fed to harness prompts
+- CLI-emitted events (`tab.new`, `tab.open`, `tab.close`, `doc.open`) are applied by the extension in real time
 
 ### Dynamic plugin system (everything is pluggable)
-Three plugin families, discovered from built-ins, drop-in `.py` files
-in `plugins/`, and package entry-points:
+Three plugin families, discovered from built-ins, drop-in `.py` files in `plugins/`, and package entry-points:
 - `browserstonks_integrations` — transports (websocket, stdio built-in)
 - `browserstonks_form_adapters` — form-builder site adapters
 - `browserstonks_harnesses` — agent harnesses
 
 ### LLM providers
-OpenRouter, OpenAI (and any OpenAI-compatible base_url), Anthropic, or
-offline (rulebook only). Keys via `.env` with `${VAR}` expansion in
-`config.jsonc`.
+OpenRouter, OpenAI (and any OpenAI-compatible base_url), Anthropic, or offline (rulebook only). Keys via `.env` with `${VAR}` expansion in `config.jsonc`.
 
 ### Harness server authentication
-Per-harness `auth` block in `config.jsonc`: bearer, basic, apikey
-(custom header or query param), plus arbitrary extra headers — for any
-secure server-mode harness.
+Per-harness `auth` block in `config.jsonc`: bearer, basic, apikey (custom header or query param), plus arbitrary extra headers — for any secure server-mode harness.
 
 ### Custom MCP servers
-Declare Model Context Protocol servers in `config.jsonc`
-(`mcpServers`); launched over stdio JSON-RPC, tools listed and callable
-by the planner.
+Declare Model Context Protocol servers in `config.jsonc` (`mcpServers`); launched over stdio JSON-RPC, tools listed and callable by the planner.
 
 ### Config & validation
 - `config.jsonc` — JSON-with-comments config; `${VAR}` env expansion
-- `config.schema.jsonc` — schema of every allowed field; `serve`
-  auto-syncs it with the packaged schema; `doctor` validates
+- `config.schema.jsonc` — schema of every allowed field; `serve` auto-syncs it with the packaged schema; `doctor` validates
 - `.env` — loaded before integrations start (see `.env.example`)
 
 ### Headless / CI-ready (by design)
-The event bus records browser events when no browser is attached, so
-the same action pipeline can run headless and be asserted on later —
-the foundation for CI/CD automation without a display.
+The event bus records browser events when no browser is attached, so the same action pipeline can run headless and be asserted on later — the foundation for CI/CD automation without a display.
 
 ## Quick start
 
@@ -109,9 +84,7 @@ browserstonks init          # config.jsonc, config.schema.jsonc, .env, answers.j
 ./start.sh                  # or ./start.sh --daemon
 ```
 
-Load `chrome-extension/` as an unpacked extension
-(`chrome://extensions` → Developer mode → Load unpacked), open any form,
-click **Fill this form**, or open the sidepanel and chat with a harness.
+Load `chrome-extension/` as an unpacked extension (`chrome://extensions` → Developer mode → Load unpacked), open any form, click **Fill this form**, or open the sidepanel and chat with a harness.
 
 ## CLI commands
 
@@ -170,7 +143,6 @@ CLI/                     Python CLI
 
 ## Status
 
-Verified end-to-end against live services: the full plan/fill pipeline,
-the chat → action → browser-event round-trip, a real OpenCode server,
-and an OpenClaw gateway (transport level; its model backend was erroring
-independently). Hermes integration is CLI-driven and provider-limited.
+[x] Verified end-to-end against live services: the full plan/fill pipeline, the chat → action → browser-event round-trip
+[x] A real OpenCode server, and an OpenClaw gateway (transport level; its model backend was erroring independently).
+[x] Hermes integration is CLI-driven and provider-limited.
