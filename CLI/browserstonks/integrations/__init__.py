@@ -63,11 +63,8 @@ class BaseIntegration:
             return plan
 
         if mtype == "chat" and self.chat_handler is not None:
-            conn = getattr(self, "_conn", None)
-
             async def _emit(ev: dict) -> None:
-                if conn is not None:
-                    await conn.send(json.dumps(ev))
+                await self._send(ev)
 
             resp = await self.chat_handler.handle(msg, emit=_emit)
             resp["requestId"] = msg.get("requestId")
@@ -122,6 +119,17 @@ class WebSocketIntegration(BaseIntegration):
         self.port = port
         self._conn = None
         self._read_futures: dict[str, asyncio.Future] = {}
+        # serialize ALL sends: websockets raises/corrupts on concurrent
+        # send() calls from different tasks (progress emits from executor
+        # threads race with dispatch replies otherwise)
+        self._send_lock = asyncio.Lock()
+
+    async def _send(self, payload: dict) -> None:
+        ws = self._conn
+        if ws is None:
+            return
+        async with self._send_lock:
+            await ws.send(json.dumps(payload))
 
     async def start(self) -> None:
         import websockets
@@ -134,7 +142,7 @@ class WebSocketIntegration(BaseIntegration):
                     try:
                         msg = json.loads(raw)
                     except json.JSONDecodeError:
-                        await ws.send(json.dumps({"error": "bad json"}))
+                        await self._send({"error": "bad json"})
                         continue
                     try:
                         resp = await self.dispatch(msg)
@@ -152,7 +160,7 @@ class WebSocketIntegration(BaseIntegration):
                                 resp.setdefault("requestId", msg.get("requestId"))
                             if "tabId" not in resp and msg.get("tabId") is not None:
                                 resp["tabId"] = msg.get("tabId")
-                        await ws.send(json.dumps(resp))
+                        await self._send(resp)
                         self._log_msg(msg, resp)
             finally:
                 self._conn = None
@@ -171,9 +179,9 @@ class WebSocketIntegration(BaseIntegration):
         rid = f"readhtml_{tab_id}_{id(self):x}"
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._read_futures[rid] = fut
-        await ws.send(json.dumps({
+        await self._send({
             "type": "tab.read.request", "tabId": tab_id, "requestId": rid,
-        }))
+        })
         try:
             html = await asyncio.wait_for(fut, timeout)
             _dbg("tab html received for tab %s (%d chars)", tab_id, len(html))

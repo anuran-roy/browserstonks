@@ -26,9 +26,9 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .harnesses import HarnessManager, HarnessError
-from .session import EventBus, SessionTracker
+from .harnesses import HarnessError, HarnessManager
 from .logging_util import log as _log
+from .session import EventBus, SessionTracker
 
 _chat_log = _log("chat")
 _act_log = _log("actions")
@@ -151,7 +151,7 @@ class ChatHandler:
             # if this batch opens tabs, give the browser a moment to
             # actually open + report them before reads resolve
             if any(a["op"] in ("tab.new", "tab.open") for a in actions):
-                await asyncio.sleep(2.0)
+                await _aio.sleep(2.0)
             applied = await self._apply_actions(actions, message, result,
                                                 results_out=results_payload)
             applied_total.extend(applied)
