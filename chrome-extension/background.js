@@ -430,7 +430,7 @@ async function fillActiveTab() {
 }
 
 // popup / sidepanel triggers
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "FILL_PAGE") {
     fillActiveTab().then(sendResponse);
     return true; // async response
