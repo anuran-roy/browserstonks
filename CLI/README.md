@@ -38,6 +38,29 @@ the browser to this CLI, which provides:
     browserstonks serve         # start all enabled integrations (default: ws on 8765)
     browserstonks doctor        # validate config, env keys, MCP servers
 
+Or use the scripts: `./start.sh` (foreground), `./start.sh --daemon`
+(logs to serve.log), `./stop.sh`. Set `BS_VERBOSE=1` or `BS_DEBUG=1`
+before start.sh to control log detail.
+
+## Logging
+
+Every subsystem logs through named loggers (`ws`, `chat`, `harness`,
+`actions`, `plan`, `answers`, `mcp`, `plugins`, `config`), so you can
+follow a request across every hop with timestamps:
+
+    17:37:06.535 INFO  [chat]    turn start opencode/primary (message 42 chars)
+    17:37:06.536 INFO  [harness] opencode server POST /session -> 1.2KB (0.3s)
+    17:37:06.910 INFO  [actions] tab.new https://example.com -> event queued
+    17:37:06.911 INFO  [chat]    turn complete opencode/primary: reply 120 chars, 1 action(s)
+
+Levels: `INFO` = one line per pipeline step (default); `DEBUG` adds
+payloads (generated programs, HTTP bodies, answer sources); `WARN`/`ERROR`
+cover failures and degradations. Control with:
+
+- `browserstonks serve --verbose` / `--debug`
+- `BROWSERSTONKS_LOG=DEBUG` in the environment or `.env`
+- `BS_VERBOSE=1` / `BS_DEBUG=1` with `./start.sh`
+
 ## Config
 
 `config.jsonc` (JSON with comments) holds LLM provider keys, harness
