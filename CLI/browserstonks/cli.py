@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from .logging_util import setup_logging, log as get_logger
 from .config import Config, loads_jsonc
 from .llm import make_provider, LLMError
 from .mcp import MCPManager
@@ -136,7 +137,7 @@ def _build_planner(cfg: Config) -> Planner:
         try:
             provider = make_provider(llm_cfg)
         except LLMError as e:
-            print(f"[llm] {e} (falling back to rulebook only)")
+            get_logger("config").warning("%s (falling back to rulebook only)", e)
     return Planner(rulebook=rulebook, provider=provider)
 
 
@@ -149,16 +150,17 @@ def cmd_serve(args: argparse.Namespace) -> int:
     local_schema = cfg.root / "config.schema.jsonc"
     if not local_schema.exists() or local_schema.read_text() != packaged.read_text():
         local_schema.write_text(packaged.read_text())
-        print("updated config.schema.jsonc to current CLI schema")
+        get_logger("config").info("updated config.schema.jsonc to current CLI schema")
 
     errors = cfg.validate()
     if errors:
-        print("config validation failed:")
+        get_logger("config").error("config validation failed:")
         for e in errors:
-            print(f"  - {e}")
+            get_logger("config").error("  - %s", e)
         return 1
     if cfg.missing_env:
-        print(f"[env] unset variables referenced in config: {cfg.missing_env}")
+        get_logger("config").warning(
+            "unset variables referenced in config: %s", cfg.missing_env)
 
     mcp = MCPManager(cfg.data)
     mcp.start_all()
@@ -195,7 +197,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
                                tracker=tracker, bus=bus))
 
     if not enabled:
-        print("no integrations enabled in config.jsonc")
+        get_logger("ws").error("no integrations enabled in config.jsonc")
         return 1
 
     async def run_all() -> None:
@@ -278,6 +280,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--version", action="version", version=__version__)
     ap.add_argument("--root", default=str(ROOT),
                     help="config directory (default: CLI install dir)")
+    ap.add_argument("-v", "--verbose", action="store_true",
+                    help="verbose logging (INFO+ pipeline steps)")
+    ap.add_argument("--debug", action="store_true",
+                    help="debug logging (payloads, internals)")
+
+    # logging must be configured before any command runs
+    import argparse as _ap
+    pre = _ap.ArgumentParser(add_help=False)
+    pre.add_argument("-v", "--verbose", action="store_true")
+    pre.add_argument("--debug", action="store_true")
+    pre_args, _ = pre.parse_known_args(argv)
+    setup_logging(verbose=pre_args.verbose, debug=pre_args.debug)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("init", help="write config files")

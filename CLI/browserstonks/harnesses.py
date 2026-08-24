@@ -113,15 +113,21 @@ class BaseHarness:
 
     def _http(self, method: str, path: str, body: dict | None = None,
               timeout: int = 180) -> Any:
+        import time as _time
         base = self.config["base_url"].rstrip("/")
         req = urllib.request.Request(
             f"{base}{path}{self._auth_query()}", method=method,
             data=json.dumps(body).encode() if body is not None else None,
             headers=self._headers(),
         )
+        t0 = _time.monotonic()
+        _h_log.debug("%s server %s %s", self.name, method, path)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 raw = r.read().decode()
+                _h_log.info("%s server %s %s -> %d bytes (%.0fms)",
+                            self.name, method, path, len(raw),
+                            (_time.monotonic() - t0) * 1000)
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as e:
             detail = ""
@@ -129,13 +135,19 @@ class BaseHarness:
                 detail = e.read().decode()[:300]
             except Exception:  # noqa: BLE001
                 pass
+            _h_log.error("%s server %s %s -> %d: %s",
+                         self.name, method, path, e.code, detail)
             raise HarnessError(
                 f"{self.name} server {method} {path} -> {e.code}: {detail}") from e
         except Exception as e:  # noqa: BLE001
+            _h_log.error("%s server error (%s): %s", self.name, path, e)
             raise HarnessError(f"{self.name} server error ({path}): {e}") from e
 
 
 from .prompt import build_prompt as _build_shared_prompt
+from .logging_util import log as _log
+
+_h_log = _log("harness")
 
 
 def _shared_prompt(config: dict, message: str,
@@ -170,15 +182,20 @@ class OpenCodeHarness(BaseHarness):
                timeout: int = 120) -> str:
         cmd = [self.config.get("command", "opencode"), *args]
         try:
+            _h_log.info("opencode local: %s (stdin %d chars)",
+                        " ".join(cmd[:4]), len(stdin or ""))
             proc = subprocess.run(
                 cmd, input=stdin, capture_output=True, text=True,
                 timeout=timeout, cwd=self.config.get("workdir"),
             )
         except FileNotFoundError as e:
+            _h_log.error("opencode binary not found: %s", cmd[0])
             raise HarnessError(
                 f"opencode binary not found ({cmd[0]}); install it or set "
                 "harnesses.opencode.command") from e
         if proc.returncode != 0:
+            _h_log.error("opencode exited %d: %s", proc.returncode,
+                         proc.stderr[:300])
             raise HarnessError(f"opencode exited {proc.returncode}: {proc.stderr[:500]}")
         return proc.stdout
 
@@ -435,11 +452,13 @@ class HarnessManager:
         live = self.sessions.setdefault(harness, {})
         sess = live.get(session_id)
         if sess is None:
+            _h_log.info("starting %s session '%s'", harness, session_id)
             sess = live[session_id] = h.start_session(session_id, context or {})
         sess.record("user", message)
         try:
             result = h.send(sess, message, context)
         except HarnessError as e:
+            _h_log.error("%s/%s turn failed: %s", harness, session_id, e)
             return {"reply": f"⚠️ harness error: {e}", "actions": [], "meta": {"error": str(e)}}
         sess.record("assistant", result.get("reply", ""))
         result.setdefault("session", {"harness": harness, "id": session_id})

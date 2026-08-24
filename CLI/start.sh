@@ -12,6 +12,10 @@ cd "$(dirname "$0")"
 PY=python3
 HOST=127.0.0.1
 PORT=8765
+# verbosity: set BS_VERBOSE=1 (INFO) or BS_DEBUG=1 (payloads) before start.sh
+EXTRA_FLAGS=()
+[ "${BS_VERBOSE:-0}" = "1" ] && EXTRA_FLAGS+=(--verbose)
+[ "${BS_DEBUG:-0}" = "1" ] && EXTRA_FLAGS+=(--debug)
 
 # pick a python that has the deps (websockets) available
 if ! "$PY" -c "import websockets" 2>/dev/null; then
@@ -46,7 +50,7 @@ if lsof -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 if [ "${1:-}" = "--daemon" ]; then
-  nohup "$PY" -m browserstonks.cli --root . serve > serve.log 2>&1 &
+  nohup "$PY" -m browserstonks.cli --root . "${EXTRA_FLAGS[@]}" serve > serve.log 2>&1 &
   echo $! > serve.pid
   echo "  mode   : daemon (pid $(cat serve.pid), log: serve.log)"
   for i in $(seq 1 25); do
@@ -64,5 +68,5 @@ else
   echo "  mode   : foreground (Ctrl-C to stop)"
   echo ""
   echo "Listening on ws://$HOST:$PORT — Chrome extension can connect now."
-  exec "$PY" -m browserstonks.cli --root . serve
+  exec "$PY" -m browserstonks.cli --root . "${EXTRA_FLAGS[@]}" serve
 fi

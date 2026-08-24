@@ -18,6 +18,10 @@ from typing import Any
 
 from ..planner import Planner
 from ..form_adapters import extract_site_adapter
+from ..logging_util import log as _log
+
+_ws_log = _log("ws")
+_dbg = _ws_log.debug
 
 
 class BaseIntegration:
@@ -36,6 +40,7 @@ class BaseIntegration:
     async def dispatch(self, msg: dict[str, Any]) -> dict[str, Any] | None:
         """Route a client message: plan / chat / session.* / ping."""
         mtype = msg.get("type", "")
+        _dbg("dispatch %s (requestId=%s)", mtype, msg.get("requestId"))
 
         # tab HTML replies (fufilled by the extension asynchronously)
         if mtype == "tab.read.response":
@@ -115,7 +120,7 @@ class WebSocketIntegration(BaseIntegration):
         import websockets
 
         async def on_conn(ws):
-            print(f"[ws] client connected: {ws.remote_address}", flush=True)
+            _ws_log.info("client connected %s", ws.remote_address)
             self._conn = ws
             try:
                 async for raw in ws:
@@ -142,15 +147,15 @@ class WebSocketIntegration(BaseIntegration):
                         self._log_msg(msg, resp)
             finally:
                 self._conn = None
-                print(f"[ws] client disconnected: {ws.remote_address}", flush=True)
+                _ws_log.info("client disconnected %s", ws.remote_address)
 
         async with websockets.serve(on_conn, self.host, self.port):
-            print(f"[ws] BrowserStonks listening on ws://{self.host}:{self.port}",
-                  flush=True)
+            _ws_log.info("listening on ws://%s:%s", self.host, self.port)
             await asyncio.Future()  # run forever
 
     async def request_tab_html(self, tab_id: int, timeout: float = 20) -> str:
         """Ask the connected extension for a tab's HTML (tab.read support)."""
+        _dbg("requesting tab html for tab %s", tab_id)
         ws = self._conn
         if ws is None:
             raise RuntimeError("no browser connected")
@@ -161,7 +166,13 @@ class WebSocketIntegration(BaseIntegration):
             "type": "tab.read.request", "tabId": tab_id, "requestId": rid,
         }))
         try:
-            return await asyncio.wait_for(fut, timeout)
+            html = await asyncio.wait_for(fut, timeout)
+            _dbg("tab html received for tab %s (%d chars)", tab_id, len(html))
+            return html
+        except asyncio.TimeoutError:
+            _ws_log.warning("tab html request for tab %s timed out (%ss)",
+                            tab_id, timeout)
+            raise
         finally:
             self._read_futures.pop(rid, None)
 
@@ -172,14 +183,20 @@ class WebSocketIntegration(BaseIntegration):
         if mtype == "plan":
             dom = msg.get("dom", {})
             n = sum(len(f.get("fields", [])) for f in dom.get("forms", []))
-            print(f"[ws] plan {rid}: {dom.get('url', '?')} ({n} fields) -> "
-                  f"{len(resp.get('values', {}))} values", flush=True)
+            _ws_log.info("plan %s: %s (%d fields) -> %d values",
+                         rid, dom.get("url", "?"), n,
+                         len(resp.get("values", {})))
         elif mtype == "chat":
             applied = resp.get("actionsApplied", [])
-            print(f"[ws] chat {rid} [{msg.get('harness')}/{msg.get('sessionId')}]: "
-                  f"{len(applied)} action(s) applied", flush=True)
-        elif not mtype.startswith("session."):
-            print(f"[ws] {mtype} {rid}", flush=True)
+            ops = ", ".join(f"{a['op']}:{'ok' if a.get('ok') else 'FAIL'}"
+                            for a in applied) or "none"
+            _ws_log.info("chat %s [%s/%s]: reply %d chars, actions: %s",
+                         rid, msg.get("harness"), msg.get("sessionId"),
+                         len(resp.get("reply", "")), ops)
+        elif mtype.startswith("session."):
+            _dbg("session event %s applied", mtype)
+        else:
+            _ws_log.info("%s %s", mtype, rid)
 
 
 class StdioIntegration(BaseIntegration):

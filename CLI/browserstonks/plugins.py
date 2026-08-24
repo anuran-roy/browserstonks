@@ -24,6 +24,8 @@ import pkgutil
 from pathlib import Path
 from typing import Type
 
+from .logging_util import log as _log
+
 ENTRYPOINT_GROUPS = [
     "browserstonks_integrations",
     "browserstonks_form_adapters",
@@ -115,6 +117,13 @@ class PluginRegistry:
             self.register_integration(name, cls)
         for name, cls in BUILTIN_ADAPTERS.items():
             self.register_adapter(name, cls)
+        self._plog("loaded built-ins: integrations=%s adapters=%s harnesses="
+                   "(via HarnessManager)",
+                   sorted(BUILTIN_INTEGRATIONS), sorted(BUILTIN_ADAPTERS))
+
+    def _plog(self, msg: str, *args) -> None:
+        from .logging_util import log as _log
+        _log("plugins").debug(msg, *args)
 
     def _absorb_module(self, mod) -> None:
         table = getattr(mod, "ENTRYPOINTS", None)
@@ -138,7 +147,10 @@ def get_registry(plugins_dir: Path | None = None) -> PluginRegistry:
     if _registry is None:
         _registry = PluginRegistry()
         _registry.load_builtins()
+        loaded = []
         if plugins_dir is not None:
-            _registry.load_local_plugins(plugins_dir)
+            loaded = _registry.load_local_plugins(plugins_dir)
+            if loaded:
+                _log("plugins").info("local plugins loaded: %s", loaded)
         _registry.load_entrypoints()
     return _registry

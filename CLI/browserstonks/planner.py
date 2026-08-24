@@ -23,6 +23,10 @@ from typing import Any
 from .form_adapters import detect_site
 from .llm import BaseProvider
 from .answers import get_answers
+from .logging_util import log as _log
+
+_plan_log = _log("plan")
+_ans_log = _log("answers")
 
 SYSTEM_PROMPT = """You write small Python programs that fill web forms.
 You will be given a JSON description of a form (fields with labels, types,
@@ -70,26 +74,35 @@ class Planner:
     async def plan(self, description: dict[str, Any]) -> dict[str, Any]:
         site = description.get("site", "generic")
         url = description.get("url", "")
+        fields = description.get("fields", [])
+        _plan_log.info("planning %s form: %s (%d fields)",
+                       site, url or "?", len(fields))
         values = self.lookup_answers(site, url)
         if values is None:
             values = self.rulebook.get("defaults", {})
 
         # Rulebook values are keyed by lowercased label; generate answers
         # for any field the rulebook didn't cover (LLM if configured).
-        fields = description.get("fields", [])
         resolved = await get_answers(
             fields, values=values, provider=self.provider,
             context={"url": url, "site": site})
         # rulebook/LLM merged answers (LLM only fills gaps, never overrides)
         values = {**resolved, **{k: v for k, v in values.items() if v}}
+        _plan_log.info("answers resolved: %d/%d fields (source: rulebook=%d, "
+                       "llm=%s, mock fallback for rest)",
+                       len(values), len(fields),
+                       len(self.lookup_answers(site, url) or {}),
+                       "yes" if self.provider else "no")
 
         program = self._rule_program(description, values)
         if program is None and self.provider is not None:
+            _plan_log.info("rulebook program empty; asking LLM to write one")
             program = self._llm_program(description)
 
         if program is None:
             program = self._rule_program(description, values, force=True)
 
+        _plan_log.debug("program (%d chars):\n%s", len(program or ""), program)
         return {"program": program, "values": values, "site": site}
 
     def _rule_program(self, description: dict, values: dict,

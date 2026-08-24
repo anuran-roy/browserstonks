@@ -27,6 +27,10 @@ from typing import Any
 
 from .harnesses import HarnessManager, HarnessError
 from .session import EventBus, SessionTracker
+from .logging_util import log as _log
+
+_chat_log = _log("chat")
+_act_log = _log("actions")
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -91,32 +95,43 @@ class ChatHandler:
             return {"type": "chat.response", "error": "empty message"}
 
         context = self._context()
-        # reply_waiter: if the turn produces tab.read/tab.process actions,
-        # we execute them and feed results back to the harness as a new
-        # turn, looping until it replies without those actions (max 3).
+        _chat_log.info("turn start %s/%s (message %d chars)",
+                       harness, session_id, len(message))
         reply_text = message
         applied_total: list[dict[str, Any]] = []
         result: dict[str, Any] = {}
         for _round in range(4):
+            _chat_log.debug("harness round %d: sending %d chars",
+                            _round + 1, len(reply_text))
             result = self.harnesses.chat(harness, reply_text, session_id, context)
             reply_text = ""
             actions = result.get("actions", [])
             if not any(a["op"] in ("tab.read", "tab.process") for a in actions):
                 break
+            _chat_log.info("round %d: harness requested %s -> executing",
+                           _round + 1,
+                           [a["op"] for a in actions
+                            if a["op"] in ("tab.read", "tab.process")])
             # execute read/process actions and collect results
             results_payload = []
             applied = await self._apply_actions(actions, message, result,
                                                 results_out=results_payload)
             applied_total.extend(applied)
             if not results_payload:
+                _chat_log.warning("round %d: no read/process results "
+                                  "(all failed?) — stopping loop", _round + 1)
                 break
             reply_text = ("ACTION RESULTS (from your tab.read/tab.process "
                           "actions):\n" + json.dumps(results_payload, indent=2)[:60000])
         else:
+            _chat_log.warning("read/process loop hit round limit")
             result = {"reply": "⚠️ too many read/process rounds", "actions": []}
 
         applied = await self._apply_actions(result.get("actions", []), message, result)
         applied_total.extend(applied)
+        _chat_log.info("turn complete %s/%s: reply %d chars, %d action(s)",
+                       harness, session_id, len(result.get("reply", "")),
+                       len(applied_total))
 
         return {
             "type": "chat.response",
@@ -149,6 +164,7 @@ class ChatHandler:
                 if op in ("tab.new", "tab.open"):
                     url = args[0] if args else ""
                     ev = self.bus.tab_new(url)
+                    _act_log.info("tab.new %s -> event queued", url)
                     applied.append({"op": op, "url": url, "ok": True,
                                     "event": ev["type"]})
                 elif op == "tab.close":
@@ -158,8 +174,10 @@ class ChatHandler:
                         tab_id = active.tab_id if active else None
                     if tab_id is not None:
                         ev = self.bus.tab_close(tab_id)
+                        _act_log.info("tab.close %s -> event queued", tab_id)
                         applied.append({"op": op, "tabId": tab_id, "ok": True})
                     else:
+                        _act_log.warning("tab.close: no tab id and no active tab")
                         applied.append({"op": op, "ok": False,
                                         "error": "no tab id and no active tab"})
                 elif op == "tab.read":
@@ -184,12 +202,16 @@ class ChatHandler:
                     content = self._doc_content(fmt, filename, result, original_message)
                     path = self._write_doc(filename, content)
                     ev = self.bus.doc_open(f"file://{path}")
+                    _act_log.info("doc.create %s (%s, %d chars) -> %s",
+                                  filename, fmt, len(content), path)
                     applied.append({"op": "doc.create", "file": str(path),
                                     "format": fmt, "ok": True, "chars": len(content)})
                 else:
+                    _act_log.warning("unknown action op '%s' (args=%s)", op, args)
                     applied.append({"op": op, "ok": False,
                                     "error": f"unknown action op '{op}'"})
             except Exception as e:  # noqa: BLE001
+                _act_log.warning("action %s failed: %s", op, e)
                 applied.append({"op": op, "ok": False, "error": str(e)})
         return applied
 
@@ -215,16 +237,22 @@ class ChatHandler:
         """Fetch a tab's HTML via the integration (extension reads the DOM)."""
         target = self._resolve_tab(args[0] if args else "")
         if "error" in target:
+            _act_log.warning("tab.read resolve failed: %s", target["error"])
             return target
         reader = getattr(self, "tab_reader", None)
         if reader is None:
+            _act_log.warning("tab.read: no tab_reader wired (integration "
+                             "cannot read tabs)")
             return {"error": "this integration cannot read tabs"}
         try:
+            _act_log.info("tab.read tab %s (%s)…", target["tab_id"], target["url"])
             html = await _maybe_await(reader(target["tab_id"]))
         except Exception as e:  # noqa: BLE001
+            _act_log.warning("tab.read failed for tab %s: %s", target["tab_id"], e)
             return {"error": f"tab read failed: {e}", "tab": target["url"]}
         # keep payloads sane for the harness context window
         html = (html or "")[:100_000]
+        _act_log.info("tab.read ok: %d chars from %s", len(html), target["url"])
         return {"ok": True, "tab": target["url"], "html": html}
 
     async def _tab_process(self, args: list[str],
@@ -232,19 +260,25 @@ class ChatHandler:
         """Run harness-written process(HTML) code against a tab's HTML."""
         target = self._resolve_tab(args[0] if args else "")
         if "error" in target:
+            _act_log.warning("tab.process resolve failed: %s", target["error"])
             return target
         code = self._fenced_code(result or {}, "python")
         if not code or "def process" not in code:
+            _act_log.warning("tab.process: missing ```python process(HTML) block")
             return {"error": "tab.process requires a fenced ```python block "
                              "defining process(HTML)"}
         reader = getattr(self, "tab_reader", None)
         if reader is None:
             return {"error": "this integration cannot read tabs"}
         try:
+            _act_log.info("tab.process tab %s (%s), %d chars of code…",
+                          target["tab_id"], target["url"], len(code))
             html = (await _maybe_await(reader(target["tab_id"])))[:200_000]
             outcome = _run_process_code(code, html)
         except Exception as e:  # noqa: BLE001
+            _act_log.warning("tab.process failed for tab %s: %s", target["tab_id"], e)
             return {"error": f"tab process failed: {e}", "tab": target["url"]}
+        _act_log.info("tab.process ok: %s", json.dumps(outcome)[:200])
         return {"ok": True, "tab": target["url"], "result": outcome}
 
     @staticmethod

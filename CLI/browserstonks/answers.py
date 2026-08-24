@@ -16,6 +16,9 @@ from __future__ import annotations
 from typing import Any
 
 from .llm import BaseProvider, LLMError
+from .logging_util import log as _log
+
+_ans_log = _log("answers")
 
 ANSWER_SYSTEM_PROMPT = """You are filling in a web form on the user's behalf.
 You will be given the form's URL and one question (its label, type, and
@@ -47,6 +50,7 @@ async def get_answer(field: dict[str, Any],
 
     # 1. rulebook
     if values and values.get(key):
+        _ans_log.debug("answer for '%s': rulebook", key)
         return values[key]
 
     # 2. LLM
@@ -64,12 +68,15 @@ async def get_answer(field: dict[str, Any],
             answer = provider.complete(ANSWER_SYSTEM_PROMPT, prompt)
             answer = (answer or "").strip()
         except Exception:  # noqa: BLE001 - any provider failure falls back
+            _ans_log.warning("LLM answer failed for '%s'; using mock", key)
             answer = ""
         if answer:
+            _ans_log.debug("answer for '%s': llm (%d chars)", key, len(answer))
             return answer
 
     # 3. no rulebook answer, no (working) LLM: mock answer so the field
     # still gets written during testing
+    _ans_log.debug("answer for '%s': mock fallback", key)
     return MOCK_ANSWER
 
 

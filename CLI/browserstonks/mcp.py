@@ -119,16 +119,18 @@ class MCPManager:
     """Starts/stops configured servers; exposes tools to the planner."""
 
     def __init__(self, config_data: dict[str, Any]) -> None:
+        from .logging_util import log as _log
+        self.log = _log("mcp")
         self.servers = load_mcp_servers(config_data)
 
     def start_all(self) -> None:
         for srv in self.servers.values():
             try:
                 srv.start()
-                print(f"[mcp] started '{srv.name}' "
-                      f"({len(srv.tools)} tools)")
+                self.log.info("started '%s' (%d tools)", srv.name,
+                              len(srv.tools))
             except Exception as e:  # noqa: BLE001
-                print(f"[mcp] failed to start '{srv.name}': {e}")
+                self.log.error("failed to start '%s': %s", srv.name, e)
 
     def stop_all(self) -> None:
         for srv in self.servers.values():
