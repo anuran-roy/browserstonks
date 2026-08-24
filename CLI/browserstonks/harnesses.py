@@ -135,6 +135,16 @@ class BaseHarness:
             raise HarnessError(f"{self.name} server error ({path}): {e}") from e
 
 
+from .prompt import build_prompt as _build_shared_prompt
+
+
+def _shared_prompt(config: dict, message: str,
+                   context: dict[str, Any] | None) -> str:
+    """All harnesses share one action-vocabulary system prompt."""
+    ctx = context or {}
+    return _build_shared_prompt(message, ctx.get("browser", {}))
+
+
 # ----------------------------------------------------------------------------
 # OpenCode (local CLI subprocess or a server speaking its HTTP API)
 # ----------------------------------------------------------------------------
@@ -194,7 +204,7 @@ class OpenCodeHarness(BaseHarness):
     def send(self, session: HarnessSession, message: str,
              context: dict[str, Any] | None = None) -> dict[str, Any]:
         oc_session = self.sessions.get(session.session_id, session.session_id)
-        prompt = self._build_prompt(message, context)
+        prompt = _shared_prompt(self.config, message, context)
         if self.mode == "server":
             body: dict[str, Any] = {
                 "parts": [{"type": "text", "text": prompt}],
@@ -218,18 +228,8 @@ class OpenCodeHarness(BaseHarness):
         return {"reply": out, "actions": _extract_actions(out), "meta": {"mode": "local"}}
 
     def _build_prompt(self, message: str, context: dict[str, Any] | None) -> str:
-        ctx = context or {}
-        parts = [
-            "You are driving a browser automation assistant (BrowserStonks).",
-            "You may reply with normal markdown, and you may include action",
-            "lines on their own rows, in exactly this format:",
-            "    [[tab.new|https://example.com]]",
-            "    [[doc.create|markdown|<filename>.md]]  (second arg: html|markdown|text)",
-            "Browser session state follows as JSON:",
-            json.dumps(ctx.get("browser", {}), indent=2)[:4000],
-            f"User: {message}",
-        ]
-        return "\n".join(parts)
+        # legacy alias: kept so plugins subclassing OpenCodeHarness keep working
+        return _shared_prompt(self.config, message, context)
 
 
 # ----------------------------------------------------------------------------
@@ -271,7 +271,7 @@ class OpenClawHarness(BaseHarness):
 
     def send(self, session: HarnessSession, message: str,
              context: dict[str, Any] | None = None) -> dict[str, Any]:
-        prompt = OpenCodeHarness(self.config)._build_prompt(message, context)
+        prompt = _shared_prompt(self.config, message, context)
         if self.mode == "server":
             # one session key per chat session, sent as its own label
             session_key = (self.config.get("sessionKey")
@@ -344,7 +344,7 @@ class HermesHarness(BaseHarness):
 
     def send(self, session: HarnessSession, message: str,
              context: dict[str, Any] | None = None) -> dict[str, Any]:
-        prompt = OpenCodeHarness(self.config)._build_prompt(message, context)
+        prompt = _shared_prompt(self.config, message, context)
         cmd = self.config.get("command", "hermes")
         try:
             proc = subprocess.run(
