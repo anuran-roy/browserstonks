@@ -77,7 +77,7 @@ class ChatHandler:
                  tracker: SessionTracker, bus: EventBus,
                  docs_dir: Path | None = None,
                  tab_reader: Any = None,
-                 max_rounds: int = 16) -> None:
+                 max_rounds: int = 256) -> None:
         self.harnesses = harness_manager
         self.tracker = tracker
         self.bus = bus
