@@ -72,6 +72,16 @@ class BaseIntegration:
                 msg.get("harness", "opencode"), msg.get("sessionId", "primary"))
             return {"type": "chat.stop.ack", "stopped": stopped}
 
+        if mtype == "sessions.list" and self.chat_handler is not None:
+            return {"type": "sessions.list",
+                    "sessions": self.chat_handler.sessions_list()}
+
+        if mtype == "session.load" and self.chat_handler is not None:
+            return self.chat_handler.session_load(msg.get("sessionId", ""))
+
+        if mtype == "session.delete" and self.chat_handler is not None:
+            return self.chat_handler.session_delete(msg.get("sessionId", ""))
+
         if mtype == "chat" and self.chat_handler is not None:
             async def _emit(ev: dict) -> None:
                 await self._send(ev)

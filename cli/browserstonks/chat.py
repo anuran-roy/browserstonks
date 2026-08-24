@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +94,40 @@ class ChatHandler:
         # stop flag for in-flight turns (user pressed Stop in the panel)
         import threading as _th
         self._stop_events: dict[tuple, "_th.Event"] = {}
+        # persistent chat history (config root / sessions/)
+        from .session_store import SessionStore
+        self.store = SessionStore(docs_dir.parent / "sessions")
+
+    # ----------------------------------------------------------- session store
+    def sessions_list(self) -> list[dict]:
+        return self.store.list()
+
+    def session_load(self, sid: str) -> dict:
+        data = self.store.load(sid)
+        if data is None:
+            return {"error": f"no saved session '{sid}'"}
+        return {"type": "session.load", "session": data}
+
+    def session_delete(self, sid: str) -> dict:
+        ok = self.store.delete(sid)
+        return {"type": "session.delete", "deleted": ok}
+
+    def _record_turn(self, harness: str, session_id: str,
+                     user_msg: str, reply: str, actions: list,
+                     reasoning: str = "") -> None:
+        """Persist one user+assistant exchange to the session store."""
+        try:
+            data = self.store.load(session_id) or {
+                "id": session_id, "messages": [], "created": time.time()}
+            msgs = data.get("messages", [])
+            msgs.append({"role": "user", "content": user_msg,
+                         "ts": time.time()})
+            msgs.append({"role": "assistant", "content": reply,
+                         "ts": time.time(), "actions": actions or [],
+                         "reasoning": reasoning or ""})
+            self.store.save(session_id, harness, msgs)
+        except Exception as e:  # noqa: BLE001 - persistence must not kill turns
+            _chat_log.warning("session save failed: %s", e)
 
     # ------------------------------------------------------------------ turn
     async def handle(self, msg: dict[str, Any], emit=None) -> dict[str, Any]:
@@ -229,19 +264,22 @@ class ChatHandler:
 
         applied = await self._apply_actions(result.get("actions", []), message, result)
         applied_total.extend(applied)
-        _chat_log.info("turn complete %s/%s: reply %d chars, %d action(s)",
-                       harness, session_id, len(result.get("reply", "")),
-                       len(applied_total))
-
-        return {
-            "type": "chat.response",
-            "harness": harness,
-            "session": result.get("session", {"harness": harness, "id": session_id}),
+        _record = {
+            "type": "chat.response", "harness": harness,
+            "session": {"harness": harness, "id": session_id},
             "reply": result.get("reply", ""),
             "actionsApplied": applied_total,
             "events": self.bus.drain(),
             "meta": result.get("meta", {}),
         }
+        # persist the exchange (never fatal)
+        self._record_turn(harness, session_id, message,
+                          result.get("reply", ""), applied_total,
+                          (result.get("meta") or {}).get("reasoning", ""))
+        _chat_log.info("turn complete %s/%s: reply %d chars, %d action(s)",
+                       harness, session_id, len(result.get("reply", "")),
+                       len(applied_total))
+        return _record
 
     def _context(self) -> dict[str, Any]:
         active = self.tracker.active_tab()

@@ -8,3 +8,4 @@ serve.pid
 CLI/docs/
 node_modules/
 config.jsonc.bak
+cli/sessions/

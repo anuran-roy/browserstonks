@@ -135,7 +135,9 @@ function connect() {
           })));
         return;
       }
-      if (msg.type === "chat.response" || msg.type === "harnesses.list") {
+      if (msg.type === "chat.response" || msg.type === "harnesses.list"
+          || msg.type === "sessions.list" || msg.type === "session.load"
+          || msg.type === "session.delete") {
         deliverChatReply(msg);
         return;
       }
@@ -480,6 +482,23 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "HARNESSES_LIST") {
     send({ type: "harnesses.list", requestId: "hl_" + (++msgIdSeq.n) });
     pendingChatReplies.set("hl_" + msgIdSeq.n, sendResponse);
+    return true;
+  }
+  if (msg.type === "SESSIONS_LIST") {
+    send({ type: "sessions.list", requestId: "sl_" + (++msgIdSeq.n) });
+    pendingChatReplies.set("sl_" + msgIdSeq.n, sendResponse);
+    return true;
+  }
+  if (msg.type === "SESSION_LOAD") {
+    send({ type: "session.load", sessionId: msg.sessionId,
+           requestId: "sld_" + (++msgIdSeq.n) });
+    pendingChatReplies.set("sld_" + msgIdSeq.n, sendResponse);
+    return true;
+  }
+  if (msg.type === "SESSION_DELETE") {
+    send({ type: "session.delete", sessionId: msg.sessionId,
+           requestId: "sd_" + (++msgIdSeq.n) });
+    pendingChatReplies.set("sd_" + msgIdSeq.n, sendResponse);
     return true;
   }
   // offscreen document can't use chrome.tabs; relay its page calls

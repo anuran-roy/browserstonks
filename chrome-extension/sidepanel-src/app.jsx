@@ -74,7 +74,8 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [harnesses, setHarnesses] = useState([]);
   const [harness, setHarness] = useState("opencode");
-  const [sessionId] = useState(() => "sp-" + Date.now().toString(36));
+  const [sessionId, setSessionId] = useState(() => "sp-" + Date.now().toString(36));
+  const [savedSessions, setSavedSessions] = useState([]);
   const [connected, setConnected] = useState(false);
   const [progress, setProgress] = useState(null); // {text, reasoning, ts}
   const [stopping, setStopping] = useState(false);
@@ -135,7 +136,7 @@ function App() {
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, []);
 
-  // ask the background worker for CLI status + available harnesses
+  // ask the background worker for CLI status + available harnesses + sessions
   const refresh = useCallback(async () => {
     const status = await chrome.runtime.sendMessage({ type: "GET_STATUS" });
     setConnected(!!status?.connected);
@@ -146,9 +147,40 @@ function App() {
         setHarness(list.harnesses[0].name);
       }
     }
+    const sess = await chrome.runtime.sendMessage({ type: "SESSIONS_LIST" })
+      .catch(() => null);
+    if (sess?.sessions) setSavedSessions(sess.sessions);
   }, [harness]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // pick a saved session: swap the active session id and restore the transcript
+  async function pickSession(value) {
+    if (value === "__new__") {
+      setSessionId("sp-" + Date.now().toString(36));
+      setMessages([]);
+      return;
+    }
+    const data = await chrome.runtime.sendMessage(
+      { type: "SESSION_LOAD", sessionId: value }).catch(() => null);
+    if (data?.session) {
+      setSessionId(data.session.id);
+      if (data.session.harness) setHarness(data.session.harness);
+      setMessages((data.session.messages || []).map((m) => ({
+        role: m.role === "assistant" ? "assistant" : m.role,
+        content: m.content,
+        actions: m.actions || [],
+        reasoning: m.reasoning || "",
+      })));
+    }
+  }
+
+  async function deleteSession(ev, sid) {
+    ev.stopPropagation(); ev.preventDefault();
+    await chrome.runtime.sendMessage(
+      { type: "SESSION_DELETE", sessionId: sid }).catch(() => null);
+    refresh();
+  }
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
@@ -226,6 +258,22 @@ function App() {
             ))}
         </select>
       </header>
+      <div className="session-bar">
+        <select value={savedSessions.find((s) => s.id === sessionId) ? sessionId : "__new__"}
+                onChange={(e) => pickSession(e.target.value)}
+                title="Chat session — pick a saved conversation or start new">
+          <option value="__new__">＋ New session</option>
+          {savedSessions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.harness}: {s.title || s.id} ({s.messages})
+            </option>
+          ))}
+        </select>
+        {savedSessions.find((s) => s.id === sessionId) && (
+          <button className="session-del" title="Delete this saved session"
+                  onClick={(ev) => deleteSession(ev, sessionId)}>🗑</button>
+        )}
+      </div>
 
       <div className="messages" ref={listRef}>
         {messages.length === 0 && (
