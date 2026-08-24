@@ -6,28 +6,30 @@ the browser to this CLI, which provides:
 
 - **Agentic form filling** — form detection, answer resolution
   (rulebook → LLM → mock), and Python programs executed on the page via
-  Pyodide (WASM) by the integration.
+  Pyodide (WASM) by the integration. Pre-filled fields are never
+  overwritten.
 - **Session tracking** — a coherent model of windows/tabs/profiles,
   kept in sync with the live browser, fed to agent prompts.
 - **Agent-harness chat** — the sidepanel talks to coding-agent harnesses
-  (OpenCode, OpenClaw, Hermes) whose replies can open tabs, browse, and
-  create documents (HTML/markdown/text) through CLI-emitted browser
-  events (`tab.new`, `doc.open`, …).
+  (OpenCode, OpenClaw, Hermes) whose replies drive the browser:
+  open/close/read tabs, run Python against page HTML, and create
+  documents (HTML/markdown/text). Long turns stream the model's
+  reasoning live; multi-step research chains across many read rounds.
 
 ## Architecture
 
     [integration (e.g. Chrome extension)]
-        |  plan / chat / session.* messages over the transport
+        |  plan / chat / session.* / tab.read.* over the transport
         v
-    [PluginManager]  <- dynamic transports (stdio, http, websocket, ...)
+    [PluginManager]  <- dynamic transports (stdio, websocket, ...)
         |
     [FormPlanner]    <- site adapters (Google Forms, Typeform, generic)
         |            <- answers: rulebook -> LLM (OpenRouter/OpenAI/Anthropic)
     [SessionTracker] <- windows/tabs/profiles, kept coherent
     [EventBus]       <- tab.new / doc.open events applied by the browser
-    [ChatHandler]    <- harness turns -> actions (browser ops, doc creation)
-        |
-    [HarnessManager] <- OpenCode / OpenClaw / Hermes (+ plugin harnesses)
+    [ChatHandler]    <- harness turns -> multi-round work loop
+        |               (actions executed, results fed back, events flushed)
+    [HarnessManager] <- OpenCode (SSE streaming) / OpenClaw / Hermes
         |
     [MCP tools]      <- optional Model Context Protocol servers from config.jsonc
 
@@ -63,7 +65,7 @@ Every subsystem logs through named loggers (`ws`, `chat`, `harness`,
 follow a request across every hop with timestamps:
 
     17:37:06.535 INFO  [chat]    turn start opencode/primary (message 42 chars)
-    17:37:06.536 INFO  [harness] opencode server POST /session -> 1.2KB (0.3s)
+    17:37:06.536 INFO  [harness] opencode SSE event stream connected
     17:37:06.910 INFO  [actions] tab.new https://example.com -> event queued
     17:37:06.911 INFO  [chat]    turn complete opencode/primary: reply 120 chars, 1 action(s)
 
@@ -78,14 +80,31 @@ cover failures and degradations. Control with:
 ## Config
 
 `config.jsonc` (JSON with comments) holds LLM provider keys, harness
-endpoints + auth, integration settings, and MCP server definitions.
-`.env` is loaded before integrations start; config values support
-`${VAR}` expansion from the environment. `config.schema.jsonc` documents
-every allowed field (auto-synced by `serve`).
+endpoints + auth (bearer/basic/apikey/headers), integration settings,
+and MCP server definitions. `.env` is loaded before integrations start;
+config values support `${VAR}` expansion from the environment.
+`config.schema.jsonc` documents every allowed field (auto-synced by
+`serve`).
 
-## Adding integrations
+## Harnesses
+
+- **OpenCode** — server mode (`base_url`) uses the real HTTP API: async
+  prompts, SSE event streaming (`/event`) for live thinking deltas,
+  session busy/idle for turn completion, and automatic tool-permission
+  approval (`autoApproveTools`: true once / "always" / false). Local
+  binary mode also supported. `turnTimeout` (default 600s) and
+  `pollInterval` are configurable.
+- **OpenClaw** — gateway `/tools/invoke` API (`sessions_send` +
+  `sessions_history` polling), bearer-token auth.
+- **Hermes** — driven through the `hermes` CLI (`hermes -z`).
+
+Any harness via the `browserstonks_harnesses` plugin group; streaming
+harnesses implement `send(..., on_progress=…)`.
+
+## Adding integrations / plugins
 
 Any Python package exposing `browserstonks_integrations` (a dict of
 `name -> Integration subclass`) is auto-discovered, as are
 `browserstonks_form_adapters` and `browserstonks_harnesses`. Drop-in
-`.py` files in `plugins/` work too. See `INTEGRATIONS.md`.
+`.py` files in `plugins/` work too. See `INTEGRATIONS.md` for the full
+wire protocol.

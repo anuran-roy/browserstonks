@@ -84,7 +84,7 @@ OpenClaw, Hermes), builds the extension sidepanel, auto-configures
 token from `~/.openclaw`), validates with `doctor`, and starts serving:
 
 ```
-cd CLI
+cd cli
 ./setup.sh                    # install + configure + start
 ./setup.sh --no-start         # install + configure only
 ./setup.sh --skip-harnesses   # CLI + extension only
@@ -93,7 +93,7 @@ cd CLI
 Manual alternative:
 
 ```
-cd CLI
+cd cli
 pip install -e .
 browserstonks init            # config.jsonc, config.schema.jsonc, .env, answers.jsonc
 # put LLM_API_KEY in .env; configure harnesses in config.jsonc
@@ -124,7 +124,7 @@ browserstonks doctor    # validate config/env/keys/harnesses/mcp
 | `{type:"chat.response", reply, actionsApplied, events}` | CLI → client | chat reply + applied actions + browser events |
 | `{type:"browser.events", events}` | CLI → client | events to apply (tab.new, doc.open, …) |
 
-See `CLI/INTEGRATIONS.md` for the full protocol and plugin authoring
+See `cli/INTEGRATIONS.md` for the full protocol and plugin authoring
 guide.
 
 ## Repo layout
@@ -138,7 +138,7 @@ chrome-extension/        MV3 extension
   sidepanel-src/         React + streamdown chat source (esbuild → sidepanel.js)
   popup.html/.js         fill button, chat button, CLI URL setting
   vendor/pyodide/        bundled Pyodide runtime
-CLI/                     Python CLI
+cli/                     Python CLI
   browserstonks/
     cli.py               init/serve/plan/doctor
     config.py            JSONC + .env loading, ${VAR} expansion, validation
@@ -148,18 +148,20 @@ CLI/                     Python CLI
     form_adapters.py     generic / Google Forms / Typeform
     planner.py           fill-program generation (rulebook + LLM)
     answers.py           per-field answer resolution (async get_answer)
+    prompt.py            shared harness system prompt (action vocabulary)
+    logging_util.py      named loggers, levels, BROWSERSTONKS_LOG
     session.py           SessionTracker + EventBus
-    chat.py              chat handler, action routing, doc creation
-    harnesses.py         OpenCode / OpenClaw / Hermes + auth + sessions
+    chat.py              chat handler, work loop, action routing, docs
+    harnesses.py         OpenCode (SSE) / OpenClaw / Hermes + auth + sessions
     llm.py               provider clients
     mcp.py               MCP server support
   plugins/               drop-in plugin directory
   setup.sh               one-command install: CLI + harnesses + extension build
-  start.sh / stop.sh     server lifecycle scripts
+  start.sh / stop.sh     server lifecycle scripts (BS_VERBOSE/BS_DEBUG)
 ```
 
 ## Status
 
-- [x] Verified end-to-end against live services: the full plan/fill pipeline, the chat → action → browser-event round-trip
-- [x] A real OpenCode server, and an OpenClaw gateway (transport level; its model backend was erroring independently).
-- [x] Hermes integration is CLI-driven and provider-limited.
+- [x] Verified end-to-end against live services: the full plan/fill pipeline, chat → action → browser-event round-trips, and multi-round research turns (open tabs, read HTML through the user's browser, chained reads, doc creation)
+- [x] OpenCode server mode fully verified live: SSE thinking streams, multi-turn memory, tool-use turns with auto-approved permissions
+- [x] OpenClaw gateway verified at transport level; Hermes is CLI-driven (provider-limited).
