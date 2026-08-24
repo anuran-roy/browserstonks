@@ -62,6 +62,24 @@
       "type": "string",
       "description": "Rulebook file (relative to config root) with saved answers"
     },
+    "docsDir": {
+      "type": "string",
+      "description": "Directory (relative to config root) where chat-created docs are written"
+    },
+    "harnesses": {
+      "type": "object",
+      "description": "Agent harnesses for the sidepanel chat (opencode/openclaw/hermes + plugins)",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "command": { "type": "string", "description": "Local binary (default: harness name)" },
+          "workdir": { "type": "string" },
+          "base_url": { "type": "string", "description": "Server mode HTTP endpoint" },
+          "token": { "type": "string", "description": "Bearer token for server mode" },
+          "enabled": { "type": "boolean" }
+        }
+      }
+    },
     "mcpServers": {
       "type": "object",
       "description": "Custom MCP servers launched over stdio JSON-RPC",

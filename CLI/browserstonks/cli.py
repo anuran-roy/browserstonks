@@ -45,6 +45,23 @@ INIT_CONFIG = """\
     "typeform": true
   },
   "answersFile": "answers.jsonc",
+  "docsDir": "docs",
+  "harnesses": {
+    // Agent harnesses used by the sidepanel chat. Local = CLI binary,
+    // server = HTTP endpoint. Uncomment the ones you have.
+    "opencode": {
+      // "command": "opencode", "workdir": ".",
+      // server mode: "base_url": "http://127.0.0.1:4096", "token": "${OPENCODE_TOKEN}"
+    },
+    "openclaw": {
+      // "command": "openclaw",
+      // "base_url": "http://127.0.0.1:5000"
+    },
+    "hermes": {
+      // "command": "hermes",
+      // "base_url": "http://127.0.0.1:8080"
+    }
+  },
   "mcpServers": {
     // "example": {
     //   "command": "npx", "args": ["-y", "@example/mcp-server"],
@@ -134,16 +151,29 @@ def cmd_serve(args: argparse.Namespace) -> int:
     planner = _build_planner(cfg)
     registry = get_registry(cfg.root / "plugins")
 
+    # chat / harness / browser-session pipeline for the sidepanel
+    from .session import SessionTracker, EventBus
+    from .harnesses import HarnessManager
+    from .chat import ChatHandler
+    tracker = SessionTracker()
+    bus = EventBus()
+    harnesses = HarnessManager(cfg.data)
+    chat = ChatHandler(harnesses, tracker, bus,
+                       docs_dir=cfg.root / cfg.get("docsDir", "docs"))
+
     enabled = []
     for name, spec in (cfg.get("integrations") or {}).items():
         if not spec.get("enabled", False):
             continue
         cls = registry.integration(name)
         if name == "websocket":
-            enabled.append(cls(planner, host=spec.get("host", "127.0.0.1"),
+            enabled.append(cls(planner, chat_handler=chat,
+                               tracker=tracker, bus=bus,
+                               host=spec.get("host", "127.0.0.1"),
                                port=int(spec.get("port", 8765))))
         else:
-            enabled.append(cls(planner))
+            enabled.append(cls(planner, chat_handler=chat,
+                               tracker=tracker, bus=bus))
 
     if not enabled:
         print("no integrations enabled in config.jsonc")
@@ -154,6 +184,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
             await asyncio.gather(*(i.start() for i in enabled))
         finally:
             mcp.stop_all()
+            harnesses.stop_all()
 
     try:
         asyncio.run(run_all())
