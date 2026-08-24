@@ -6,6 +6,68 @@ import { Streamdown } from "streamdown";
 
 const HARNESS_ORDER = ["opencode", "openclaw", "hermes"];
 
+// one action badge: hover -> rich link preview (title, OG description,
+// site name, favicon); click -> focus the exact tab this action opened
+function ActionChip({ a, eventTabs }) {
+  const [meta, setMeta] = useState(null);
+  const [hover, setHover] = useState(false);
+  const url = a.url || a.file || a.tab || "";
+  const isWeb = /^https?:\/\//.test(url);
+
+  useEffect(() => {
+    if (hover && isWeb && !meta) {
+      chrome.runtime.sendMessage({ type: "GET_PAGE_META", url })
+        .then(setMeta)
+        .catch(() => {});
+    }
+  }, [hover]); // eslint-disable-line
+
+  async function focusTab() {
+    if (!url) return;
+    const tabId = eventTabs.get(url);
+    const r = await chrome.runtime.sendMessage(
+      { type: "FOCUS_TAB", tabId, url: isWeb ? url : undefined })
+      .catch(() => null);
+    if (!r?.ok) {
+      // tab gone (or never opened — failed op): open it fresh
+      if (isWeb) chrome.tabs.create({ url, active: true });
+    }
+  }
+
+  let host = "";
+  try { if (isWeb) host = new URL(url).hostname.replace(/^www\./, ""); } catch {}
+
+  return (
+    <span className="chip-wrap">
+      <button className={"chip " + (a.ok ? "ok" : "bad")} onClick={focusTab}
+              onMouseEnter={() => setHover(true)}
+              onMouseLeave={() => setHover(false)}
+              title={url || a.op}>
+        {a.op}{a.ok === false ? " ✕" : " ✓"}
+      </button>
+      {hover && isWeb && (
+        <span className="chip-preview">
+          <span className="preview-head">
+            <img className="preview-favicon" src={
+              `https://www.google.com/s2/favicons?domain=${encodeURIComponent(url)}&sz=64`}
+                 alt="" />
+            <span className="preview-host">{host}</span>
+          </span>
+          <span className="preview-title">
+            {meta ? (meta.title || host) : "loading…"}
+          </span>
+          {meta?.siteName && <span className="preview-site">{meta.siteName}</span>}
+          <span className="preview-desc">
+            {meta ? (meta.description || meta.error || "") : ""}
+          </span>
+          {meta?.image && <img className="preview-image" src={meta.image} alt="" />}
+          <span className="preview-url">{url}</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 function App() {
   const [messages, setMessages] = useState([]); // {role, content, actions?, error?, reasoning?}
   const [input, setInput] = useState("");
@@ -16,6 +78,8 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [progress, setProgress] = useState(null); // {text, reasoning, ts}
   const [stopping, setStopping] = useState(false);
+  const eventTabsRef = useRef(new Map()); // url -> real tab id (CLI-opened tabs)
+  const [, forceTick] = useState(0);
   const listRef = useRef(null);
   const progressRef = useRef({ text: "", reasoning: "" });
 
@@ -28,6 +92,14 @@ function App() {
         else buf.text += msg.text;
         setProgress({ text: buf.text, reasoning: buf.reasoning,
                       ts: Date.now() });
+      }
+      if (msg.type === "EVENT_TAB") {
+        // background opened a real tab for a CLI event — remember the
+        // mapping so action badges can jump to the exact tab
+        if (msg.url && msg.tabId != null) {
+          eventTabsRef.current.set(msg.url, msg.tabId);
+          forceTick((n) => n + 1);
+        }
       }
       if (msg.type === "CHAT_COMPLETED") {
         // CLI's guaranteed end-of-turn signal (ok/error/timeout/stopped).
@@ -174,9 +246,7 @@ function App() {
             {m.actions?.length > 0 && (
               <div className="actions">
                 {m.actions.map((a, j) => (
-                  <span key={j} className={"chip " + (a.ok ? "ok" : "bad")}>
-                    {a.op}{a.ok === false ? " ✕" : " ✓"}
-                  </span>
+                  <ActionChip key={j} a={a} eventTabs={eventTabsRef.current} />
                 ))}
               </div>
             )}

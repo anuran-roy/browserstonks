@@ -243,6 +243,10 @@ async function applyBrowserEvents(events) {
           ? await chrome.tabs.create({ ...props, windowId: ev.windowId })
           : await chrome.tabs.create(props);
         log("event", ev.type, "-> tab", tab.id, ev.url);
+        // remember which real tab this event opened, so UI badges can
+        // jump straight to it
+        eventTabIds.set(ev.url, tab.id);
+        notifyEventTab(ev.url, tab.id);
         reportSession(); // state changed
       } else if (ev.type === "tab.close") {
         await chrome.tabs.remove(ev.tabId);
@@ -258,6 +262,48 @@ async function applyBrowserEvents(events) {
       log("event", ev.type, "failed:", e.message);
     }
   }
+}
+
+// url -> real chrome tab id for tabs the CLI opened
+const eventTabIds = new Map();
+
+function notifyEventTab(url, tabId) {
+  chrome.runtime.sendMessage({ type: "EVENT_TAB", url, tabId })
+    .catch(() => {});
+}
+
+// ---------------------------------------------------------------- metadata
+// rich link previews for action badges: page title + Open Graph tags,
+// fetched directly (extension has <all_urls> host permission). Cached.
+const metaCache = new Map();
+
+async function fetchPageMeta(url) {
+  if (metaCache.has(url)) return metaCache.get(url);
+  const meta = { url, title: "", description: "", siteName: "",
+                 image: "", favicon: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(url)}&sz=64` };
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(url, { signal: ctrl.signal, credentials: "omit" });
+    clearTimeout(t);
+    const html = (await res.text()).slice(0, 300 * 1024); // head is early
+    const pick = (prop) => {
+      const m = html.match(new RegExp(
+        `<meta[^>]+(?:property|name)=["']${prop}["'][^>]+content=["']([^"']+)["']`, "i"))
+        || html.match(new RegExp(
+        `<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${prop}["']`, "i"));
+      return m ? m[1] : "";
+    };
+    meta.title = (html.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] || "";
+    meta.description = pick("og:description") || pick("description");
+    meta.siteName = pick("og:site_name");
+    meta.image = pick("og:image");
+    if (meta.title) meta.title = meta.title.trim();
+  } catch (e) {
+    meta.error = e.message; // preview still shows URL + favicon
+  }
+  metaCache.set(url, meta);
+  return meta;
 }
 
 // ---------------------------------------------------------------- session reporting
@@ -404,6 +450,32 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     });
     sendResponse({ stopping: true });
     return;
+  }
+  if (msg.type === "GET_PAGE_META") {
+    fetchPageMeta(msg.url).then(sendResponse)
+      .catch((e) => sendResponse({ url: msg.url, error: e.message }));
+    return true; // async
+  }
+  if (msg.type === "FOCUS_TAB") {
+    // focus/activate a tab by id (or find by url substring)
+    (async () => {
+      try {
+        let tabId = msg.tabId;
+        if (tabId == null && msg.url) {
+          const tabs = await chrome.tabs.query({});
+          const hit = tabs.find((t) => t.url && t.url.includes(msg.url));
+          if (hit) tabId = hit.id;
+        }
+        if (tabId == null) throw new Error("tab not found");
+        const tab = await chrome.tabs.get(tabId);
+        await chrome.tabs.update(tabId, { active: true });
+        if (tab.windowId != null) await chrome.windows.update(tab.windowId, { focused: true });
+        sendResponse({ ok: true, tabId });
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
+    })();
+    return true; // async
   }
   if (msg.type === "HARNESSES_LIST") {
     send({ type: "harnesses.list", requestId: "hl_" + (++msgIdSeq.n) });
