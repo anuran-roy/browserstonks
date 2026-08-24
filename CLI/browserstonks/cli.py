@@ -142,6 +142,15 @@ def _build_planner(cfg: Config) -> Planner:
 
 def cmd_serve(args: argparse.Namespace) -> int:
     cfg = Config(Path(args.root)).load()
+
+    # keep the root config.schema.jsonc in sync with the packaged one so
+    # validation never fails on fields added by newer CLI versions
+    packaged = INIT_SCHEMA
+    local_schema = cfg.root / "config.schema.jsonc"
+    if not local_schema.exists() or local_schema.read_text() != packaged.read_text():
+        local_schema.write_text(packaged.read_text())
+        print("updated config.schema.jsonc to current CLI schema")
+
     errors = cfg.validate()
     if errors:
         print("config validation failed:")
