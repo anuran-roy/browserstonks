@@ -37,7 +37,7 @@
   // database: default sqlite (tokens.db); also accepts
   // postgres://… or mongodb://… DSNs (driver optional).
   "auth": {
-    "required": false
+    "required": true
   },
   "harnesses": {
     "opencode": {

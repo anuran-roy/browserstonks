@@ -297,11 +297,17 @@ def _token_store(args: argparse.Namespace):
 
 
 def cmd_tokens_issue(args: argparse.Namespace) -> int:
+    # the token is printed to stdout for copy/paste or capture; keep
+    # log lines OFF stdout so they never pollute it
+    import logging as _logging
+    import sys as _sys
+    from .logging_util import log as _log
+    _log("auth").setLevel(_logging.CRITICAL)  # silence INFO lines
     store, _cfg = _token_store(args)
     token = store.issue(args.label)
     print(token)
     print("(shown once — store it now; only its hash is saved)",
-          file=sys.stderr)
+          file=_sys.stderr)
     return 0
 
 

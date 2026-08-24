@@ -2,6 +2,7 @@ README.md
 pyproject.toml
 browserstonks/__init__.py
 browserstonks/answers.py
+browserstonks/auth.py
 browserstonks/chat.py
 browserstonks/cli.py
 browserstonks/config.py
@@ -14,6 +15,8 @@ browserstonks/planner.py
 browserstonks/plugins.py
 browserstonks/prompt.py
 browserstonks/session.py
+browserstonks/session_store.py
+browserstonks/storage.py
 browserstonks.egg-info/PKG-INFO
 browserstonks.egg-info/SOURCES.txt
 browserstonks.egg-info/dependency_links.txt

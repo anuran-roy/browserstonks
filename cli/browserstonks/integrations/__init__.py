@@ -170,7 +170,8 @@ class WebSocketIntegration(BaseIntegration):
                     await ws.close(code=4001, reason="auth required")
                     return
                 if hello.get("type") != "auth" or \
-                        not self.auth_store.verify(hello.get("token", "")):
+                        not self.auth_store.verify(
+                            str(hello.get("token", "")).strip()):
                     _ws_log.warning("auth failed from %s", ws.remote_address)
                     await ws.close(code=4003, reason="invalid token")
                     return
