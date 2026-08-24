@@ -57,6 +57,7 @@ function connect() {
           log("flush failed:", e.message);
         }
       }
+      reportSession(true); // full snapshot: keep CLI's tracker coherent
     };
     ws.onclose = () => {
       log("CLI disconnected; will retry on next action");
@@ -73,7 +74,14 @@ function connect() {
       if (msg.error) {
         log("CLI returned an error:", msg.error);
         badge("ERR", "#dc2626");
-        pageLog(msg.tabId, `[browserstonks] CLI error: ${msg.error}`);
+        return;
+      }
+      if (msg.type === "browser.events") {
+        applyBrowserEvents(msg.events || []);
+        return;
+      }
+      if (msg.type === "chat.response" || msg.type === "harnesses.list") {
+        deliverChatReply(msg);
         return;
       }
       if (msg.requestId && msg.sender && msg.tabId !== undefined && msg.program) {
@@ -147,6 +155,105 @@ function send(obj) {
   });
 }
 
+// ---------------------------------------------------------------- browser events
+// Apply CLI-emitted events (tab.new / tab.open / tab.close / doc.open).
+async function applyBrowserEvents(events) {
+  for (const ev of events) {
+    try {
+      if (ev.type === "tab.new" || ev.type === "tab.open") {
+        const props = { url: ev.url, active: ev.active !== false };
+        const tab = ev.windowId != null
+          ? await chrome.tabs.create({ ...props, windowId: ev.windowId })
+          : await chrome.tabs.create(props);
+        log("event", ev.type, "-> tab", tab.id, ev.url);
+        reportSession(); // state changed
+      } else if (ev.type === "tab.close") {
+        await chrome.tabs.remove(ev.tabId);
+        log("event tab.close", ev.tabId);
+      } else if (ev.type === "doc.open") {
+        // docs created by the CLI live on disk; open via file:// URL
+        await chrome.tabs.create({ url: ev.url, active: true });
+        log("event doc.open", ev.url);
+      } else {
+        log("ignoring browser event", ev.type);
+      }
+    } catch (e) {
+      log("event", ev.type, "failed:", e.message);
+    }
+  }
+}
+
+// ---------------------------------------------------------------- session reporting
+// Keep the CLI's SessionTracker coherent: full snapshot on connect + deltas.
+let sessionTimer = null;
+
+async function reportSession(full = false) {
+  if (!full && sessionTimer) return;
+  if (!full) {
+    sessionTimer = setTimeout(() => { sessionTimer = null; reportSessionNow(false); }, 500);
+    return;
+  }
+  await reportSessionNow(true);
+}
+
+async function reportSessionNow(full) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  try {
+    if (full) {
+      const windows = await chrome.windows.getAll({ populate: true });
+      await ws.send(JSON.stringify({
+        type: "session.hello",
+        profile: await getProfileName(),
+        windows: windows.map((w) => ({
+          id: w.id,
+          tabs: (w.tabs || []).map((t) => ({
+            id: t.id, url: t.url || "", title: t.title || "", active: t.active,
+          })),
+        })),
+      }));
+    } else {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab) {
+        await ws.send(JSON.stringify({
+          type: "session.tab.updated", windowId: tab.windowId, tabId: tab.id,
+          url: tab.url || "", title: tab.title || "", active: true,
+        }));
+      }
+    }
+  } catch (e) {
+    log("session report failed:", e.message);
+  }
+}
+
+async function getProfileName() {
+  // Chrome profiles aren't exposed to extensions; approximate with a
+  // stable per-install identity in storage.
+  const { profile } = await chrome.storage.local.get("profile");
+  if (profile) return profile;
+  const name = "chrome-" + Math.random().toString(36).slice(2, 8);
+  await chrome.storage.local.set({ profile: name });
+  return name;
+}
+
+// tab lifecycle -> session deltas to the CLI
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  if (changeInfo.url || changeInfo.title || changeInfo.status === "complete") {
+    send({
+      type: "session.tab.updated", windowId: tab.windowId, tabId: tab.id,
+      url: tab.url || "", title: tab.title || "", active: tab.active,
+    });
+  }
+});
+chrome.tabs.onRemoved.addListener((tabId, { windowId }) => {
+  send({ type: "session.tab.removed", windowId, tabId });
+});
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  send({ type: "session.tab.updated", windowId, tabId, active: true });
+});
+chrome.windows.onRemoved.addListener((windowId) => {
+  send({ type: "session.window.removed", windowId });
+});
+
 // ---------------------------------------------------------------- actions
 // Make sure content.js is running in a tab. Declarative content_scripts
 // only inject on navigation, so tabs opened before the extension was
@@ -191,7 +298,7 @@ async function fillActiveTab() {
   return { ok: true, requestId, note: "program requested; watch the page" };
 }
 
-// popup / keyboard triggers
+// popup / sidepanel triggers
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "FILL_PAGE") {
     fillActiveTab().then(sendResponse);
@@ -200,6 +307,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "GET_STATUS") {
     sendResponse({ connected: !!(ws && ws.readyState === WebSocket.OPEN) });
     return;
+  }
+  // sidepanel chat: relay to the CLI with a requestId, then apply any
+  // browser events the CLI emitted (tab.new etc.) from the response
+  if (msg.type === "CHAT") {
+    const requestId = "chat_" + (++msgIdSeq.n);
+    send({
+      type: "chat", harness: msg.harness, sessionId: msg.sessionId,
+      message: msg.message, requestId, sender: "chrome-extension",
+    });
+    pendingChatReplies.set(requestId, sendResponse);
+    return true;
+  }
+  if (msg.type === "HARNESSES_LIST") {
+    send({ type: "harnesses.list", requestId: "hl_" + (++msgIdSeq.n) });
+    pendingChatReplies.set("hl_" + msgIdSeq.n, sendResponse);
+    return true;
   }
   // offscreen document can't use chrome.tabs; relay its page calls
   // to the content script in the target tab
@@ -210,6 +333,23 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true; // async response
   }
 });
+
+// chat/harness replies arriving over the websocket: resolve the waiting
+// sidepanel callback AND apply any browser events piggybacked on them
+const pendingChatReplies = new Map();
+
+function deliverChatReply(msg) {
+  const cb = pendingChatReplies.get(msg.requestId);
+  if (cb) {
+    pendingChatReplies.delete(msg.requestId);
+    cb(msg);
+  }
+  if (Array.isArray(msg.events) && msg.events.length) {
+    applyBrowserEvents(msg.events);
+  }
+}
+
+chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: false }).catch?.(() => {});
 
 chrome.action.onClicked?.addListener?.(() => {}); // popup handles clicks
 
