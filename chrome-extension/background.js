@@ -460,22 +460,25 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return;
   }
   if (msg.type === "OPEN_CHAT_PANEL") {
-    // floating edge button on a page: open the sidepanel for its tab
-    (async () => {
-      try {
-        const tabId = sender?.tab?.id;
-        if (tabId != null) {
-          await chrome.sidePanel.open({ tabId });
-          sendResponse({ ok: true });
-        } else {
-          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-          await chrome.sidePanel.open({ tabId: tab.id });
-          sendResponse({ ok: true });
-        }
-      } catch (e) {
-        sendResponse({ ok: false, error: e.message });
+    // floating edge button on a page: open the sidepanel for its tab.
+    // MUST be called synchronously here — chrome.sidePanel.open requires
+    // an active user gesture, and awaiting anything first breaks it.
+    try {
+      const tabId = sender?.tab?.id;
+      if (tabId != null) {
+        chrome.sidePanel.open({ tabId }).then(
+          () => sendResponse({ ok: true }),
+          (e) => sendResponse({ ok: false, error: e.message }));
+      } else {
+        // no tab context (e.g. popup) — fall back to the active tab
+        chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) =>
+          chrome.sidePanel.open({ tabId: tab.id }).then(
+            () => sendResponse({ ok: true }),
+            (e) => sendResponse({ ok: false, error: e.message })));
       }
-    })();
+    } catch (e) {
+      sendResponse({ ok: false, error: e.message });
+    }
     return true; // async
   }
   if (msg.type === "GET_PAGE_META") {

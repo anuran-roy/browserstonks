@@ -2,18 +2,35 @@
   "manifest_version": 3,
   "name": "BrowserStonks",
   "version": "0.1.0",
-  "description": "BrowserStonks: turn your browser into an agentic browser. AI harnesses (OpenCode, OpenClaw, Hermes) chat, browse, open tabs, fill forms, and create docs — with Python/WASM execution on the page.",
-  "permissions": ["activeTab", "scripting", "storage", "offscreen", "sidePanel", "tabs"],
-  "host_permissions": ["<all_urls>"],
-  "background": { "service_worker": "background.js" },
-  "side_panel": { "default_path": "sidepanel.html" },
+  "description": "BrowserStonks: turn your browser into an agentic browser. AI harnesses (OpenCode, OpenClaw, Hermes) chat, browse, open tabs, fill forms, and create docs \u2014 with Python/WASM execution on the page.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "offscreen",
+    "sidePanel",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -21,6 +38,15 @@
     "default_title": "BrowserStonks: fill this form",
     "default_popup": "popup.html"
   },
-  "web_accessible_resources": [],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "public/browserstonks-logo.png"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
   "icons": {}
 }

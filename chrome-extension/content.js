@@ -235,15 +235,13 @@
     style.textContent = `
       .btn {
         position: fixed; right: 0; top: 40%;
-        width: 30px; height: 84px;
+        width: 38px; height: 38px;
         background: linear-gradient(180deg, #4f46e5, #6366f1);
-        color: #fff; border: 0; border-radius: 10px 0 0 10px;
-        font: 600 11px -apple-system, "Segoe UI", system-ui, sans-serif;
-        writing-mode: vertical-rl; text-orientation: mixed;
+        color: #fff; border: 0; border-radius: 12px 0 0 12px;
         cursor: grab; user-select: none; z-index: 2147483647;
         box-shadow: -2px 2px 10px rgba(0,0,0,.25);
         display: flex; align-items: center; justify-content: center;
-        padding: 6px 3px; box-sizing: border-box;
+        padding: 5px; box-sizing: border-box;
         transition: filter .15s;
       }
       .btn:hover { filter: brightness(1.15); }
@@ -253,8 +251,13 @@
 
     const btn = document.createElement("button");
     btn.className = "btn";
-    btn.textContent = "BrowserStonks";
     btn.title = "Click to open the BrowserStonks chat panel — drag to reposition";
+    const logo = document.createElement("img");
+    // web_accessible_resource — pages can load it from the extension
+    logo.src = chrome.runtime.getURL("public/browserstonks-logo.png");
+    logo.alt = "BrowserStonks";
+    logo.style.cssText = "width:100%;height:100%;object-fit:contain;pointer-events:none;";
+    btn.appendChild(logo);
     shadow.appendChild(btn);
 
     // restore saved vertical position for this origin
