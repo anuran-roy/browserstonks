@@ -47,6 +47,11 @@ INIT_CONFIG = """\
   },
   "answersFile": "answers.jsonc",
   "docsDir": "docs",
+  // managed storage for generated docs (media/<sessionId>/ locally;
+  // uploads when enabled). provider: cloudinary (default) | s3 | gcs
+  "storage": { "enabled": false, "provider": "cloudinary" },
+  // connection-token auth: issue with `browserstonks tokens issue`
+  "auth": { "required": false },
   "harnesses": {
     // Agent harnesses used by the sidepanel chat. Local = CLI binary,
     // server = HTTP endpoint. auth configures secure-server auth.
@@ -172,12 +177,24 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from .session import SessionTracker, EventBus
     from .harnesses import HarnessManager
     from .chat import ChatHandler
+    from .storage import StorageManager
+    from .auth import TokenStore
     tracker = SessionTracker()
     bus = EventBus()
     harnesses = HarnessManager(cfg.data,
                                extra_harnesses=registry.harnesses)
     chat = ChatHandler(harnesses, tracker, bus,
                        docs_dir=cfg.root / cfg.get("docsDir", "docs"))
+    # managed-storage uploads (doc.create publishes to cloud/s3/gcs when
+    # storage.enabled is set; local media/ copy is always written first)
+    chat.storage = StorageManager(cfg.get("storage") or {}, cfg.env or {})
+    # connection-token auth (websocket auth gate)
+    auth_cfg = cfg.get("auth") or {}
+    auth_store = None
+    if auth_cfg.get("required"):
+        auth_store = TokenStore(auth_cfg.get("database"), root=cfg.root)
+        get_logger("auth").info("token auth REQUIRED (db: %s)",
+                                auth_cfg.get("database", "sqlite tokens.db"))
 
     enabled = []
     for name, spec in (cfg.get("integrations") or {}).items():
@@ -188,7 +205,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
             integration = cls(planner, chat_handler=chat,
                               tracker=tracker, bus=bus,
                               host=spec.get("host", "127.0.0.1"),
-                              port=int(spec.get("port", 8765)))
+                              port=int(spec.get("port", 8765)),
+                              auth_store=auth_store)
             # wire the tab HTML reader for harness tab.read/tab.process
             chat.tab_reader = integration.request_tab_html
             enabled.append(integration)
@@ -271,6 +289,43 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _token_store(args: argparse.Namespace):
+    from .auth import TokenStore
+    cfg = Config(Path(args.root)).load()
+    auth_cfg = cfg.get("auth") or {}
+    return TokenStore(auth_cfg.get("database"), root=cfg.root), cfg
+
+
+def cmd_tokens_issue(args: argparse.Namespace) -> int:
+    store, _cfg = _token_store(args)
+    token = store.issue(args.label)
+    print(token)
+    print("(shown once — store it now; only its hash is saved)",
+          file=sys.stderr)
+    return 0
+
+
+def cmd_tokens_revoke(args: argparse.Namespace) -> int:
+    store, _cfg = _token_store(args)
+    n = store.revoke(args.target)
+    print(f"revoked {n} token(s)")
+    return 0 if n else 1
+
+
+def cmd_tokens_list(args: argparse.Namespace) -> int:
+    import time as _t
+    store, _cfg = _token_store(args)
+    rows = store.list()
+    if not rows:
+        print("no tokens issued")
+        return 0
+    for r in rows:
+        state = "REVOKED" if r["revoked"] else "active"
+        age = _t.strftime("%Y-%m-%d %H:%M", _t.localtime(r["issued_at"]))
+        print(f"{state:8} {age}  {r['label'] or '(unlabeled)'}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="browserstonks",
@@ -307,6 +362,18 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("doctor", help="validate config/env/mcp")
     p.set_defaults(fn=cmd_doctor)
+
+    p = sub.add_parser("tokens", help="manage connection tokens "
+                         "(auth.required mode)")
+    tsub = p.add_subparsers(dest="tokens_cmd", required=True)
+    tp = tsub.add_parser("issue", help="issue a new token")
+    tp.add_argument("--label", default="", help="token label (e.g. 'work-laptop')")
+    tp.set_defaults(fn=cmd_tokens_issue)
+    tp = tsub.add_parser("revoke", help="revoke by token or label")
+    tp.add_argument("target", help="plaintext token or label to revoke")
+    tp.set_defaults(fn=cmd_tokens_revoke)
+    tp = tsub.add_parser("list", help="list tokens (hashes, not plaintext)")
+    tp.set_defaults(fn=cmd_tokens_list)
 
     args = ap.parse_args(argv)
     return args.fn(args)

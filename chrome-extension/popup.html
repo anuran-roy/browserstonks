@@ -21,6 +21,14 @@
   <label>CLI WebSocket URL
     <input id="wsUrl" placeholder="ws://127.0.0.1:8765">
   </label>
+  <label style="display:flex; align-items:center; gap:6px; margin-top:10px;">
+    <input type="checkbox" id="secureAuth" style="width:auto;">
+    Secure auth
+  </label>
+  <label id="tokenRow" style="display:none;">
+    Connection token
+    <input id="token" type="password" placeholder="bs_… (from `browserstonks tokens issue`)">
+  </label>
   <script src="popup.js"></script>
 </body>
 </html>

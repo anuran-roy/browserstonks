@@ -61,7 +61,8 @@ function broadcastConnState(connected) {
 
 // ---------------------------------------------------------------- websocket
 function connect() {
-  return CLI_WS_URL().then((url) => {
+  return browserstonksGetConfig().then((cfg) => {
+    const url = cfg.wsUrl;
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
@@ -70,6 +71,11 @@ function connect() {
     ws.onopen = () => {
       log("connected to CLI");
       startKeepalive();
+      // secure auth: token gate is the FIRST message when enabled
+      if (cfg && cfg.secureAuth && cfg.token) {
+        ws.send(JSON.stringify({ type: "auth", token: cfg.token }));
+        log("auth token sent");
+      }
       broadcastConnState(true);
       while (pending.length) {
         const m = pending.shift();

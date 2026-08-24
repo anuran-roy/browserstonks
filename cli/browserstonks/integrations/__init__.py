@@ -132,11 +132,14 @@ class WebSocketIntegration(BaseIntegration):
 
     def __init__(self, planner: Planner, host: str = "127.0.0.1",
                  port: int = 8765, chat_handler=None, tracker=None,
-                 bus=None) -> None:
+                 bus=None, auth_store=None) -> None:
         super().__init__(planner, chat_handler=chat_handler,
                          tracker=tracker, bus=bus)
         self.host = host
         self.port = port
+        # connection-token auth (auth.required in config); when the store
+        # is None auth is disabled (local mode)
+        self.auth_store = auth_store
         self._conn = None
         self._read_futures: dict[str, asyncio.Future] = {}
         # serialize ALL sends: websockets raises/corrupts on concurrent
@@ -157,6 +160,22 @@ class WebSocketIntegration(BaseIntegration):
 
         async def on_conn(ws):
             _ws_log.info("client connected %s", ws.remote_address)
+            # token auth gate: when enabled, the FIRST message must be
+            # {"type": "auth", "token": "…"} with a valid token
+            if self.auth_store is not None:
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=15)
+                    hello = json.loads(raw)
+                except Exception:  # noqa: BLE001
+                    await ws.close(code=4001, reason="auth required")
+                    return
+                if hello.get("type") != "auth" or \
+                        not self.auth_store.verify(hello.get("token", "")):
+                    _ws_log.warning("auth failed from %s", ws.remote_address)
+                    await ws.close(code=4003, reason="invalid token")
+                    return
+                _ws_log.info("auth ok from %s (label-authenticated)", ws.remote_address)
+                await ws.send(json.dumps({"type": "auth.ok"}))
             self._conn = ws
             self._inflight = {}
 

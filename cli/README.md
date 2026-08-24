@@ -77,6 +77,20 @@ cover failures and degradations. Control with:
 - `BROWSERSTONKS_LOG=DEBUG` in the environment or `.env`
 - `BS_VERBOSE=1` / `BS_DEBUG=1` with `./start.sh`
 
+## Secure internet mode & managed storage
+
+- **Connection tokens**: `browserstonks tokens issue --label <name>`
+  (prints the plaintext once; SHA-256 hash stored). `revoke` and `list`
+  manage them. With `"auth": { "required": true }` in config.jsonc the
+  websocket server requires `{"type":"auth","token":"…"}` as the first
+  message — the extension's **Secure auth** checkbox sends it. Token DB:
+  SQLite (`tokens.db`) by default; `auth.database` accepts
+  `postgres://…` or `mongodb://…` DSNs (drivers optional).
+- **Managed storage**: `"storage": { "enabled": true, "provider":
+  "cloudinary" }` (or `s3` / `gcs`, credentials in `.env`) uploads every
+  generated doc after the local `media/<sessionId>/` write;
+  `doc.open` then points at the served URL.
+
 ## Config
 
 `config.jsonc` (JSON with comments) holds LLM provider keys, harness

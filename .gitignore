@@ -4,8 +4,10 @@ __pycache__/
 .DS_Store
 serve.log
 serve.pid
-**/node_modules# chat-created documents (doc.create output)
-CLI/docs/
 node_modules/
 config.jsonc.bak
 cli/sessions/
+# generated content (uploaded + local copies)
+cli/media/
+# token database
+cli/tokens.db

@@ -62,6 +62,24 @@
       "type": "string",
       "description": "Rulebook file (relative to config root) with saved answers"
     },
+    "storage": {
+      "type": "object",
+      "description": "managed storage for generated content (doc.create publishes; local media/ copy always written first)",
+      "properties": {
+        "enabled": { "type": "boolean", "description": "enable uploads" },
+        "provider": { "type": "string", "description": "cloudinary (default) | s3 | gcs" }
+      },
+      "additionalProperties": false
+    },
+    "auth": {
+      "type": "object",
+      "description": "connection-token auth for internet-facing websocket servers",
+      "properties": {
+        "required": { "type": "boolean", "description": "require a valid token on every websocket connection" },
+        "database": { "type": "string", "description": "token DB: sqlite (default) | postgres://… | mongodb://…" }
+      },
+      "additionalProperties": false
+    },
     "docsDir": {
       "type": "string",
       "description": "Directory (relative to config root) where chat-created docs are written"

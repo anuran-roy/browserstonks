@@ -46,7 +46,7 @@ What began as form-filling automation is now a general browser-agent platform: t
   - any other harness via the `browserstonks_harnesses` plugin group
 - Harnesses reply in markdown and can emit actions:
   `[[tab.new|https://…]]`, `[[doc.create|markdown|notes.md]]`, …
-- The CLI applies actions: opens/closes real tabs, writes HTML/markdown/text docs to `docs/` and opens them
+- The CLI applies actions: opens/closes real tabs, writes HTML/markdown/text docs to `media/<sessionId>/` and opens them — optionally publishing to managed storage (Cloudinary default, S3, GCS) and opening the served URL
 
 ### Browser session awareness
 - The extension reports a full session snapshot on connect and deltas on every tab/window change
@@ -77,6 +77,15 @@ Declare Model Context Protocol servers in `config.jsonc` (`mcpServers`); launche
 The event bus records browser events when no browser is attached, so the same action pipeline can run headless and be asserted on later — the foundation for CI/CD automation without a display.
 
 ## Quick start
+
+**Secure internet mode** — expose the CLI beyond localhost safely:
+issue connection tokens (`browserstonks tokens issue --label my-laptop`),
+enable `"auth": { "required": true }` in config.jsonc (token DB: SQLite by
+default; Postgres/Mongo DSN supported), and turn on **Secure auth** in the
+extension popup, pasting the token. Connections without a valid token are
+refused. Enable `"storage": { "enabled": true, "provider": "cloudinary" }`
+(with credentials in `.env`) to publish generated docs online — the
+`doc.open` action then opens the hosted URL.
 
 One-command setup — installs the CLI, the agent harnesses (OpenCode,
 OpenClaw, Hermes), builds the extension sidepanel, auto-configures

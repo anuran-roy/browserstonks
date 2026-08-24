@@ -34,6 +34,8 @@ from .session import EventBus, SessionTracker
 _chat_log = _log("chat")
 _act_log = _log("actions")
 
+_SAFE_SESSION = re.compile(r"[^A-Za-z0-9_.-]+")
+
 
 async def _maybe_await(value: Any) -> Any:
     import inspect
@@ -88,6 +90,9 @@ class ChatHandler:
         # Set here OR injected later by serve() for integrations that
         # only become readable once started.
         self.tab_reader = tab_reader
+        # managed-storage uploader (cloudinary/s3/gcs); set by serve() —
+        # uploads happen after the local media/ write when enabled
+        self.storage = None
         # max read/process rounds per chat turn (long research tasks
         # need many; the harness stops the loop when it stops asking)
         self.max_rounds = max_rounds
@@ -240,7 +245,8 @@ class ChatHandler:
             if any(a["op"] in ("tab.new", "tab.open") for a in actions):
                 await _aio.sleep(2.0)
             applied = await self._apply_actions(actions, message, result,
-                                                results_out=results_payload)
+                                                results_out=results_payload,
+                                                session_id=session_id)
             applied_total.extend(applied)
             # flush browser events (tab.new etc.) to the browser NOW so
             # they take effect before the harness's next round — otherwise
@@ -262,7 +268,8 @@ class ChatHandler:
             _chat_log.warning("read/process loop hit round limit")
             result = {"reply": "⚠️ too many read/process rounds", "actions": []}
 
-        applied = await self._apply_actions(result.get("actions", []), message, result)
+        applied = await self._apply_actions(result.get("actions", []), message, result,
+                                            session_id=session_id)
         applied_total.extend(applied)
         _record = {
             "type": "chat.response", "harness": harness,
@@ -293,7 +300,8 @@ class ChatHandler:
     async def _apply_actions(self, actions: list[dict[str, Any]],
                        original_message: str = "",
                        result: dict[str, Any] | None = None,
-                       results_out: list | None = None) -> list[dict[str, Any]]:
+                       results_out: list | None = None,
+                       session_id: str = "primary") -> list[dict[str, Any]]:
         applied: list[dict[str, Any]] = []
         for act in actions:
             op = act.get("op", "")
@@ -357,13 +365,24 @@ class ChatHandler:
                     fmt = args[0] if len(args) > 0 else "markdown"
                     filename = args[1] if len(args) > 1 else "doc.md"
                     content = self._doc_content(fmt, filename, result, original_message)
-                    path = self._write_doc(filename, content)
-                    ev = self.bus.doc_open(
-                        f"file://{path.resolve()}")
-                    _act_log.info("doc.create %s (%s, %d chars) -> %s",
-                                  filename, fmt, len(content), path)
-                    applied.append({"op": "doc.create", "file": str(path.resolve()),
-                                    "format": fmt, "ok": True, "chars": len(content)})
+                    path = self._write_doc(filename, content, session_id)
+                    # publish to managed storage when configured; the
+                    # doc.open event then points at the served URL
+                    doc_url = f"file://{path.resolve()}"
+                    remote = None
+                    uploader = getattr(self, "storage", None)
+                    if uploader is not None:
+                        remote = uploader.upload(path, session_id)
+                        if remote:
+                            doc_url = remote
+                    ev = self.bus.doc_open(doc_url)
+                    applied.append({"op": "doc.create",
+                                    "file": str(path.resolve()),
+                                    "url": remote,
+                                    "ok": True, "chars": len(content)})
+                    _act_log.info("doc.create %s (%s, %d chars) -> %s%s",
+                                  filename, fmt, len(content), path,
+                                  f" + {remote}" if remote else "")
                 else:
                     _act_log.warning("unknown action op '%s' (args=%s)", op, args)
                     applied.append({"op": op, "ok": False,
@@ -471,7 +490,9 @@ class ChatHandler:
             return fence.group(1).strip()
         return reply.strip() or f"# Document\n\n{original_message}\n"
 
-    def _write_doc(self, filename: str, content: str) -> Path:
+    def _write_doc(self, filename: str, content: str,
+                   session_id: str = "primary") -> Path:
+        """Write doc content under media/<sessionId>/; returns the path."""
         # sanitize: no traversal, no leading dots
         filename = Path(filename).name or "doc.md"
         ext = {"html": ".html", "markdown": ".md", "md": ".md",
@@ -479,7 +500,8 @@ class ChatHandler:
         fmt_ext = Path(filename).suffix.lower()
         if fmt_ext not in ext.values():
             filename += ext.get("markdown", ".md")
-        self.docs_dir.mkdir(parents=True, exist_ok=True)
-        path = self.docs_dir / filename
+        base = self.docs_dir.parent / "media" / _SAFE_SESSION.sub("_", session_id)
+        base.mkdir(parents=True, exist_ok=True)
+        path = base / filename
         path.write_text(content, encoding="utf-8")
         return path

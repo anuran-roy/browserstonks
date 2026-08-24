@@ -3,7 +3,7 @@ const $ = (id) => document.getElementById(id);
 
 async function getConfig() {
   const { config } = await chrome.storage.local.get("config");
-  return config || { wsUrl: "ws://127.0.0.1:8765" };
+  return config || { wsUrl: "ws://127.0.0.1:8765", secureAuth: false, token: "" };
 }
 
 async function refreshStatus() {
@@ -13,15 +13,40 @@ async function refreshStatus() {
     : "CLI not connected (will retry on fill)";
 }
 
+function syncAuthFields() {
+  $("tokenRow").style.display = $("secureAuth").checked ? "block" : "none";
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   const cfg = await getConfig();
   $("wsUrl").value = cfg.wsUrl;
+  $("secureAuth").checked = !!cfg.secureAuth;
+  $("token").value = cfg.token || "";
+  syncAuthFields();
 
   $("wsUrl").addEventListener("change", async () => {
     await chrome.storage.local.set({
       config: { ...cfg, wsUrl: $("wsUrl").value },
     });
     $("status").textContent = "saved; reconnecting…";
+    refreshStatus();
+  });
+
+  $("secureAuth").addEventListener("change", async () => {
+    syncAuthFields();
+    await chrome.storage.local.set({
+      config: { ...cfg, secureAuth: $("secureAuth").checked,
+                token: $("secureAuth").checked ? ($("token").value || "") : "" },
+    });
+    $("status").textContent = "saved; reconnecting…";
+    refreshStatus();
+  });
+
+  $("token").addEventListener("change", async () => {
+    await chrome.storage.local.set({
+      config: { ...cfg, token: $("token").value },
+    });
+    $("status").textContent = "token saved; reconnecting…";
     refreshStatus();
   });
 
