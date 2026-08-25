@@ -271,20 +271,36 @@ class ChatHandler:
         applied = await self._apply_actions(result.get("actions", []), message, result,
                                             session_id=session_id)
         applied_total.extend(applied)
+        # never return an empty reply to the UI: the model sometimes emits
+        # only action lines, or a stop/abort race leaves reply blank — give
+        # the user something actionable instead of "(empty reply)"
+        reply = (result.get("reply") or "").strip()
+        if not reply:
+            if applied_total:
+                ops = ", ".join(f"{a['op']}{'✓' if a.get('ok') else '✕'}"
+                                for a in applied_total[:8])
+                reply = (f"_(no text reply — actions executed: {ops})_")
+            elif (result.get("meta") or {}).get("stopped"):
+                reply = "⏹ Stopped by user."
+            else:
+                reply = ("⚠️ The harness returned an empty reply "
+                         "(turn may have been interrupted). Try again.")
+            _chat_log.warning("empty reply from %s/%s — substituted fallback",
+                              harness, session_id)
         _record = {
             "type": "chat.response", "harness": harness,
             "session": {"harness": harness, "id": session_id},
-            "reply": result.get("reply", ""),
+            "reply": reply,
             "actionsApplied": applied_total,
             "events": self.bus.drain(),
             "meta": result.get("meta", {}),
         }
         # persist the exchange (never fatal)
         self._record_turn(harness, session_id, message,
-                          result.get("reply", ""), applied_total,
+                          reply, applied_total,
                           (result.get("meta") or {}).get("reasoning", ""))
         _chat_log.info("turn complete %s/%s: reply %d chars, %d action(s)",
-                       harness, session_id, len(result.get("reply", "")),
+                       harness, session_id, len(reply),
                        len(applied_total))
         return _record
 
