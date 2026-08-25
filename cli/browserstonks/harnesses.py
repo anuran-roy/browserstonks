@@ -161,7 +161,8 @@ def _shared_prompt(config: dict, message: str,
     """All harnesses share one action-vocabulary system prompt."""
     ctx = context or {}
     return _build_shared_prompt(message, ctx.get("browser", {}),
-                                ctx.get("activeTab"), mode=mode)
+                                ctx.get("activeTab"), mode=mode,
+                                history=ctx.get("_history"))
 
 
 # ----------------------------------------------------------------------------

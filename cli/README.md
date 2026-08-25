@@ -139,6 +139,11 @@ The mode rides the chat message (`{"mode": "build"}`), never config.jsonc.
 - The sidepanel remembers its last active session (localStorage pointer)
   and reloads the transcript when reopened — conversations survive panel
   close/reopen and browser restarts.
+- Continuity for the harness: the panel packs the full prior conversation
+  (user/assistant text, no caps) into every chat message; the CLI injects
+  it as a PRIOR CONVERSATION block ONLY when the harness session is cold
+  (first turn after restore/restart/harness switch). Switching harnesses
+  mid-chat carries the whole history to the new harness.
 
 ## Adding integrations / plugins
 

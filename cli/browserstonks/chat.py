@@ -179,6 +179,29 @@ class ChatHandler:
             return {"type": "chat.response", "error": "empty message"}
 
         request_id = msg.get("requestId")
+        # client-packed chat history: injected into the prompt ONLY when the
+        # harness session is cold (first turn of a new in-memory session) —
+        # later turns rely on the harness's own memory of the conversation.
+        live_sessions = self.harnesses.sessions.setdefault(harness, {})
+        is_fresh = session_id not in live_sessions
+        history_block = None
+        if is_fresh:
+            packed = msg.get("history") or []
+            lines = []
+            for m in packed:
+                role = m.get("role")
+                text = (m.get("content") or "").strip()
+                if role in ("user", "assistant") and text:
+                    label = "User" if role == "user" else "Assistant"
+                    lines.append(f"{label}: {text}")
+            if lines:
+                history_block = (
+                    "PRIOR CONVERSATION (already happened — do not repeat "
+                    "this content, just continue from it):\n"
+                    + "\n".join(lines))
+                _chat_log.info("injecting %d prior message(s) into %s/%s "
+                               "prompt (cold harness session)",
+                               len(lines), harness, session_id)
         # capture the event loop here (we're ON it) so the sync on_progress
         # callback — invoked from harness SSE/subprocess threads — can
         # schedule emits back onto this loop.
@@ -201,8 +224,11 @@ class ChatHandler:
                 pass
 
         context = self._context()
-        _chat_log.info("turn start %s/%s (message %d chars)",
-                       harness, session_id, len(message))
+        if history_block:
+            context["_history"] = history_block
+        _chat_log.info("turn start %s/%s (message %d chars%s)",
+                       harness, session_id, len(message),
+                       ", prior history injected" if history_block else "")
         reply_text = message
         applied_total: list[dict[str, Any]] = []
         result: dict[str, Any] = {}

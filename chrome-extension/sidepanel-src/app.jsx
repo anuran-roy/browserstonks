@@ -279,6 +279,14 @@ function App() {
     }
   }
 
+  // pack the full visible transcript (user/assistant text only) for harness
+  // recall — no caps; the model's context window is the natural ceiling
+  function packHistory(msgs) {
+    return msgs
+      .filter((m) => (m.role === "user" || m.role === "assistant") && m.content)
+      .map((m) => ({ role: m.role, content: String(m.content) }));
+  }
+
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
@@ -301,7 +309,10 @@ function App() {
       return true;
     };
     try {
-      const resp = await chrome.runtime.sendMessage({ type: "CHAT", harness, sessionId, message: text, mode });
+      const resp = await chrome.runtime.sendMessage({
+        type: "CHAT", harness, sessionId, message: text, mode,
+        history: packHistory(messages),
+      });
       if (resp?.error) {
         setMessages((m) => [...m, { role: "assistant", content: `⚠️ ${resp.error}`, error: true }]);
       } else {

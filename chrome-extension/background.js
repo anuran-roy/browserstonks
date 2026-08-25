@@ -475,7 +475,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     send({
       type: "chat", harness: msg.harness, sessionId: msg.sessionId,
       message: msg.message, mode: msg.mode || "plan", requestId,
-      sender: "chrome-extension",
+      history: msg.history || [], sender: "chrome-extension",
     });
     pendingChatReplies.set(requestId, sendResponse);
     return true;

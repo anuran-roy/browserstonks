@@ -126,7 +126,8 @@ _MODE_DESC = {
 
 def build_prompt(message: str, browser_state: dict | None = None,
                  active_tab: dict | None = None,
-                 mode: str = "plan") -> str:
+                 mode: str = "plan",
+                 history: str | None = None) -> str:
     import json
     mode_spec = _MODES.get(mode, _MODES["plan"])
     prompt = (HARNESS_SYSTEM_PROMPT_TEMPLATE
@@ -134,6 +135,8 @@ def build_prompt(message: str, browser_state: dict | None = None,
               .replace("{mode_desc}", _MODE_DESC.get(mode, _MODE_DESC["plan"]))
               .replace("{action_lines}", _action_lines(mode))
               .replace("{allowed_ops}", ", ".join(mode_spec["actions"])))
+    if history:
+        prompt += f"\n{history}\n"
     prompt += json.dumps(browser_state or {}, indent=2)[:4000]
     if active_tab:
         prompt += (f"\n\nCURRENT TAB (the page the user is looking at now): "

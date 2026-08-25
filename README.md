@@ -200,6 +200,12 @@ cli/                     Python CLI
 
 ## Changelog
 
+### 2026-08-25 (night) — Session recall on continue
+- **Client-packed chat history**: the panel sends the full prior conversation
+  with every chat message; the CLI injects it into the harness prompt only
+  when the harness session is cold — restoring a saved session, restarting
+  the CLI, or switching harnesses mid-chat all keep full context.
+
 ### 2026-08-25
 #### Modes, local models, multi-window correctness
 - **Plan / build chat modes**: `📋 plan` (read-only: tabs only, model cleans up after itself) vs `🔨 build` (doc.create/modify/delete + page actions). Toggle lives in the chat panel header, persisted to localStorage, sent per-message; actions outside the mode are filtered and reported failed.
