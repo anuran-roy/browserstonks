@@ -259,6 +259,13 @@ async function applyBrowserEvents(events) {
       } else if (ev.type === "tab.close") {
         await chrome.tabs.remove(ev.tabId);
         log("event tab.close", ev.tabId);
+      } else if (ev.type === "tab.focus") {
+        const tab = await chrome.tabs.get(ev.tabId);
+        await chrome.tabs.update(ev.tabId, { active: true });
+        if (tab.windowId != null) {
+          await chrome.windows.update(tab.windowId, { focused: true });
+        }
+        log("event tab.focus", ev.tabId, tab.url);
       } else if (ev.type === "doc.open") {
         // docs created by the CLI live on disk; open via file:// URL
         await chrome.tabs.create({ url: ev.url, active: true });
@@ -337,6 +344,7 @@ async function reportSessionNow(full) {
         profile: await getProfileName(),
         windows: windows.map((w) => ({
           id: w.id,
+          focused: w.focused,
           tabs: (w.tabs || []).map((t) => ({
             id: t.id, url: t.url || "", title: t.title || "", active: t.active,
           })),
@@ -383,6 +391,12 @@ chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
 });
 chrome.windows.onRemoved.addListener((windowId) => {
   send({ type: "session.window.removed", windowId });
+});
+// window focus changes (multi-window/multi-monitor): which window is focused
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  // chrome.windows.WINDOW_ID_NONE = -1 when no Chrome window is focused
+  send({ type: "session.window.focused",
+         windowId: windowId === chrome.windows.WINDOW_ID_NONE ? null : windowId });
 });
 
 // ---------------------------------------------------------------- actions

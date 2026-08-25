@@ -47,11 +47,13 @@ class Window:
     window_id: int
     profile: str = "default"
     tabs: dict[int, Tab] = field(default_factory=dict)
+    focused: bool = False
     updated_at: float = field(default_factory=now)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.window_id, "profile": self.profile,
+            "focused": self.focused,
             "tabs": [t.to_dict() for t in self.tabs.values()],
         }
 
@@ -91,6 +93,8 @@ class SessionTracker:
             self._tab_removed(msg)
         elif etype == "session.window.removed":
             self._window_removed(msg)
+        elif etype == "session.window.focused":
+            self._window_focused(msg)
         elif etype == "session.profile.changed":
             self.current_profile = msg.get("profile", self.current_profile)
         elif etype == "session.goodbye":
@@ -102,7 +106,8 @@ class SessionTracker:
         self.profiles = {}
         prof = self.profiles.setdefault(profile, Profile(name=profile))
         for w in msg.get("windows", []):
-            win = Window(window_id=w["id"], profile=profile)
+            win = Window(window_id=w["id"], profile=profile,
+                         focused=w.get("focused", False))
             prof.windows[win.window_id] = win
             for t in w.get("tabs", []):
                 tab = Tab(tab_id=t["id"], window_id=win.window_id,
@@ -122,11 +127,30 @@ class SessionTracker:
             tab = win.tabs[tid] = Tab(tab_id=tid, window_id=wid)
         tab.url = msg.get("url", tab.url)
         tab.title = msg.get("title", tab.title)
-        tab.active = msg.get("active", tab.active)
+        # A tab activating in ANY window clears the global "current" flag:
+        # per-window actives stay, but only one tab is the user's focus.
+        was_active = tab.active
+        now_active = msg.get("active", tab.active)
+        tab.active = now_active
         tab.updated_at = now()
-        if tab.active:
-            for other in win.tabs.values():
-                other.active = other.tab_id == tid
+        if now_active and not was_active:
+            # clear the *global* current marker: the newly focused tab is it
+            for prof2 in self.profiles.values():
+                for win2 in prof2.windows.values():
+                    for other in win2.tabs.values():
+                        other.active = other.tab_id == tid
+            # window became focused
+            for prof2 in self.profiles.values():
+                for win2 in prof2.windows.values():
+                    win2.focused = win2.window_id == wid
+
+    def _window_focused(self, msg: dict[str, Any]) -> None:
+        wid = msg.get("windowId")
+        for prof in self.profiles.values():
+            for win in prof.windows.values():
+                win.focused = win.window_id == wid
+                if wid is None:  # WINDOW_ID_NONE: no chrome window focused
+                    win.focused = False
 
     def _profile_for_window(self, window_id: int) -> Profile:
         for prof in self.profiles.values():
@@ -206,6 +230,9 @@ class EventBus:
 
     def tab_close(self, tab_id: int) -> dict:
         return self.emit("tab.close", tabId=tab_id)
+
+    def tab_focus(self, tab_id: int) -> dict:
+        return self.emit("tab.focus", tabId=tab_id)
 
     def doc_open(self, url: str) -> dict:
         return self.emit("doc.open", url=url)

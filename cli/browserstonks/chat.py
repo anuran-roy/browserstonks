@@ -325,10 +325,23 @@ class ChatHandler:
             try:
                 if op in ("tab.new", "tab.open"):
                     url = args[0] if args else ""
-                    ev = self.bus.tab_new(url)
-                    _act_log.info("tab.new %s -> event queued", url)
-                    applied.append({"op": op, "url": url, "ok": True,
-                                    "event": ev["type"]})
+                    # dedupe: if a tab with this URL is already open,
+                    # focus it instead of opening a duplicate
+                    existing = self.tracker.find_tab(url_contains=url) \
+                        if url else None
+                    if existing:
+                        ev = self.bus.tab_focus(existing.tab_id)
+                        _act_log.info("%s %s already open (tab %s) -> focus",
+                                      op, url, existing.tab_id)
+                        applied.append({"op": op, "url": url, "ok": True,
+                                        "existing": True,
+                                        "tabId": existing.tab_id,
+                                        "event": ev["type"]})
+                    else:
+                        ev = self.bus.tab_new(url)
+                        _act_log.info("tab.new %s -> event queued", url)
+                        applied.append({"op": op, "url": url, "ok": True,
+                                        "event": ev["type"]})
                 elif op == "tab.close":
                     tab_id = int(args[0]) if args and args[0].isdigit() else None
                     if tab_id is None:

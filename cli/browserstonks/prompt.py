@@ -54,13 +54,26 @@ Rules for actions:
 You can see the user's browser state below (profiles, windows, open
 tabs with ids, and which tab is active). Use tab ids from there when
 closing tabs, and use the state to answer questions about what's open.
+The tab the user is CURRENTLY looking at is called out explicitly
+below the JSON — assume that is the page they refer to with "this
+page" / "the current tab" unless they say otherwise. Before opening a
+new tab, check the state: if the URL is already open, READ it instead
+of opening a duplicate.
 
 Browser session state (JSON):
 """
 
 
-def build_prompt(message: str, browser_state: dict | None = None) -> str:
+def build_prompt(message: str, browser_state: dict | None = None,
+                 active_tab: dict | None = None) -> str:
     import json
-    return (HARNESS_SYSTEM_PROMPT
-            + json.dumps(browser_state or {}, indent=2)[:4000]
-            + f"\n\nUser: {message}")
+    out = (HARNESS_SYSTEM_PROMPT
+           + json.dumps(browser_state or {}, indent=2)[:4000])
+    if active_tab:
+        out += (f"\n\nCURRENT TAB (the page the user is looking at now): "
+                f"id={active_tab.get('id')} "
+                f"url={active_tab.get('url')} "
+                f"title={active_tab.get('title')}")
+    else:
+        out += "\n\nCURRENT TAB: unknown (no active tab reported)"
+    return out + f"\n\nUser: {message}"
