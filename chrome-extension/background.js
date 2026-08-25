@@ -141,6 +141,21 @@ function connect() {
           })));
         return;
       }
+      if (msg.type === "page.action.request") {
+        // CLI wants a page op on a tab (harness tab.action: fill/click/…)
+        chrome.tabs.sendMessage(msg.tabId, {
+          type: "PAGE_CALL", op: msg.op, args: msg.args || [],
+        })
+          .then((res) => ws.send(JSON.stringify({
+            type: "page.action.response", requestId: msg.requestId,
+            result: res?.result, error: res?.error,
+          })))
+          .catch((e) => ws.send(JSON.stringify({
+            type: "page.action.response", requestId: msg.requestId,
+            error: e.message,
+          })));
+        return;
+      }
       if (msg.type === "chat.response" || msg.type === "harnesses.list"
           || msg.type === "sessions.list" || msg.type === "session.load"
           || msg.type === "session.delete") {

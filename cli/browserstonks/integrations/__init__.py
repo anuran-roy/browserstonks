@@ -57,6 +57,15 @@ class BaseIntegration:
                     fut.set_result(html)
             return None  # no response needed
 
+        if mtype == "page.action.response":
+            fut = self._read_futures.get(msg.get("requestId", ""))
+            if fut and not fut.done():
+                if msg.get("error"):
+                    fut.set_exception(RuntimeError(str(msg["error"])))
+                else:
+                    fut.set_result(msg.get("result"))
+            return None
+
         if mtype == "plan":
             dom = msg.get("dom", {})
             description = extract_site_adapter(dom).describe(dom)
@@ -327,6 +336,32 @@ class WebSocketIntegration(BaseIntegration):
             return html
         except asyncio.TimeoutError:
             _ws_log.warning("tab html request for tab %s timed out (%ss)",
+                            tab_id, timeout)
+            raise
+        finally:
+            self._read_futures.pop(rid, None)
+
+    async def page_action(self, tab_id: int, op: str, args: list,
+                          timeout: float = 30) -> dict:
+        """Ask the extension to run a page op (fill/click/select/submit) on a
+        tab. Same request/response shape as tab.read."""
+        _dbg("page action tab %s: %s %s", tab_id, op, args)
+        ws = self._conn
+        if ws is None:
+            raise RuntimeError("no browser connected")
+        rid = f"pageact_{tab_id}_{id(self):x}"
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._read_futures[rid] = fut
+        await self._send({
+            "type": "page.action.request", "tabId": tab_id, "op": op,
+            "args": args, "requestId": rid,
+        })
+        try:
+            out = await asyncio.wait_for(fut, timeout)
+            _dbg("page action result for tab %s: %s", tab_id, str(out)[:200])
+            return out
+        except asyncio.TimeoutError:
+            _ws_log.warning("page action on tab %s timed out (%ss)",
                             tab_id, timeout)
             raise
         finally:

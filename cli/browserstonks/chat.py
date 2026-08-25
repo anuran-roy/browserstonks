@@ -90,6 +90,9 @@ class ChatHandler:
         # Set here OR injected later by serve() for integrations that
         # only become readable once started.
         self.tab_reader = tab_reader
+        # page-op caller (fill/click/select/submit on tabs); set by serve()
+        # for websocket integrations. None when the integration can't.
+        self.page_caller = None
         # managed-storage uploader (cloudinary/s3/gcs); set by serve() —
         # uploads happen after the local media/ write when enabled
         self.storage = None
@@ -168,6 +171,9 @@ class ChatHandler:
                             stop_event) -> dict[str, Any]:
         harness = msg.get("harness", "opencode")
         session_id = msg.get("sessionId", "primary")
+        mode = msg.get("mode", "plan")  # plan | build
+        if mode not in ("plan", "build"):
+            mode = "plan"
         message = (msg.get("message") or "").strip()
         if not message:
             return {"type": "chat.response", "error": "empty message"}
@@ -221,7 +227,8 @@ class ChatHandler:
                 None,
                 lambda: self.harnesses.chat(
                     harness, reply_text, session_id, context,
-                    on_progress=on_progress, stop_event=stop_event))
+                    on_progress=on_progress, stop_event=stop_event,
+                    mode=mode))
             reply_text = ""
             if stop_event.is_set():
                 _chat_log.info("turn stopped by user mid-round %d", _round + 1)
@@ -246,7 +253,8 @@ class ChatHandler:
                 await _aio.sleep(2.0)
             applied = await self._apply_actions(actions, message, result,
                                                 results_out=results_payload,
-                                                session_id=session_id)
+                                                session_id=session_id,
+                                                mode=mode)
             applied_total.extend(applied)
             # flush browser events (tab.new etc.) to the browser NOW so
             # they take effect before the harness's next round — otherwise
@@ -269,7 +277,7 @@ class ChatHandler:
             result = {"reply": "⚠️ too many read/process rounds", "actions": []}
 
         applied = await self._apply_actions(result.get("actions", []), message, result,
-                                            session_id=session_id)
+                                            session_id=session_id, mode=mode)
         applied_total.extend(applied)
         # never return an empty reply to the UI: the model sometimes emits
         # only action lines, or a stop/abort race leaves reply blank — give
@@ -317,11 +325,19 @@ class ChatHandler:
                        original_message: str = "",
                        result: dict[str, Any] | None = None,
                        results_out: list | None = None,
-                       session_id: str = "primary") -> list[dict[str, Any]]:
+                       session_id: str = "primary",
+                       mode: str = "plan") -> list[dict[str, Any]]:
+        from .prompt import allowed_actions
+        allowed = allowed_actions(mode)
         applied: list[dict[str, Any]] = []
         for act in actions:
             op = act.get("op", "")
             args = act.get("args", [])
+            if op not in allowed:
+                _act_log.warning("action %s not allowed in mode %s", op, mode)
+                applied.append({"op": op, "ok": False,
+                                "error": f"action not allowed in mode '{mode}'"})
+                continue
             try:
                 if op in ("tab.new", "tab.open"):
                     url = args[0] if args else ""
@@ -412,6 +428,46 @@ class ChatHandler:
                     _act_log.info("doc.create %s (%s, %d chars) -> %s%s",
                                   filename, fmt, len(content), path,
                                   f" + {remote}" if remote else "")
+                elif op == "doc.modify":
+                    filename = args[0] if args else ""
+                    instruction = args[1] if len(args) > 1 else ""
+                    content = self._doc_content("markdown", filename, result,
+                                                original_message)
+                    path = self._write_doc(filename, content, session_id)
+                    _act_log.info("doc.modify %s (%d chars) -> %s",
+                                  filename, len(content), path)
+                    applied.append({"op": "doc.modify",
+                                    "file": str(path.resolve()),
+                                    "instruction": instruction,
+                                    "ok": True, "chars": len(content)})
+                elif op == "doc.delete":
+                    filename = args[0] if args else ""
+                    safe = Path(filename).name
+                    path = self.docs_dir.parent / "media" / _SAFE_SESSION.sub("_", session_id) / safe
+                    if path.exists():
+                        path.unlink()
+                        _act_log.info("doc.delete %s", filename)
+                        applied.append({"op": "doc.delete", "file": str(path),
+                                        "ok": True})
+                    else:
+                        applied.append({"op": "doc.delete", "file": filename,
+                                        "ok": False, "error": "not found"})
+                elif op == "tab.action":
+                    # [[tab.action|<tabIdOrUrl>|<op>|<json-args>]]
+                    entry = await self._tab_action(args, result)
+                    applied.append({"op": op,
+                                    "url": entry.get("url")
+                                       or (args[0] if args else ""),
+                                    "tabId": entry.get("tab_id"),
+                                    "ok": entry.get("ok", False),
+                                    "error": entry.get("error")})
+                    if results_out is not None:
+                        results_out.append({
+                            "action": "tab.action",
+                            "tab": entry.get("tab", args[0] if args else "?"),
+                            "result": entry.get("result"),
+                            "error": entry.get("error"),
+                        })
                 else:
                     _act_log.warning("unknown action op '%s' (args=%s)", op, args)
                     applied.append({"op": op, "ok": False,
@@ -469,6 +525,39 @@ class ChatHandler:
         _act_log.info("tab.read ok: %d chars from %s", len(html), target["url"])
         return {"ok": True, "url": target["url"], "tab_id": target["tab_id"],
                 "tab": target["url"], "html": html}
+
+    async def _tab_action(self, args: list[str],
+                          result: dict[str, Any] | None) -> dict[str, Any]:
+        """[[tab.action|<tabIdOrUrl>|<op>|<json-args>]] — run a page op on a
+        tab via the extension (fill/click/select/submit). The extension
+        executes it in the page via its content script."""
+        if len(args) < 2:
+            return {"error": "tab.action needs <tabIdOrUrl> and <op>"}
+        target = self._resolve_tab(args[0])
+        if "error" in target:
+            _act_log.warning("tab.action resolve failed: %s", target["error"])
+            return {"error": target["error"], "url": args[0]}
+        op = args[1]
+        try:
+            import json as _j
+            op_args = _j.loads(args[2]) if len(args) > 2 and args[2] else []
+        except Exception:
+            op_args = []
+        # send the op to the extension via the integration's page-call channel
+        caller = getattr(self, "page_caller", None)
+        if caller is None:
+            return {"error": "this integration cannot drive page actions",
+                    "url": target["url"], "tab_id": target["tab_id"]}
+        try:
+            _act_log.info("tab.action tab %s (%s): %s %s", target["tab_id"],
+                          target["url"], op, op_args)
+            out = await _maybe_await(caller(target["tab_id"], op, op_args))
+        except Exception as e:  # noqa: BLE001
+            _act_log.warning("tab.action failed: %s", e)
+            return {"error": str(e), "url": target["url"],
+                    "tab_id": target["tab_id"]}
+        return {"ok": True, "url": target["url"], "tab_id": target["tab_id"],
+                "tab": target["url"], "result": out}
 
     async def _tab_process(self, args: list[str],
                            result: dict[str, Any] | None) -> dict[str, Any]:

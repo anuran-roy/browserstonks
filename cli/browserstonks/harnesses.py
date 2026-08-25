@@ -156,11 +156,12 @@ _h_log = _log("harness")
 
 
 def _shared_prompt(config: dict, message: str,
-                   context: dict[str, Any] | None) -> str:
+                   context: dict[str, Any] | None,
+                   mode: str = "plan") -> str:
     """All harnesses share one action-vocabulary system prompt."""
     ctx = context or {}
     return _build_shared_prompt(message, ctx.get("browser", {}),
-                                ctx.get("activeTab"))
+                                ctx.get("activeTab"), mode=mode)
 
 
 # ----------------------------------------------------------------------------
@@ -243,7 +244,7 @@ class OpenCodeHarness(BaseHarness):
              context: dict[str, Any] | None = None,
              on_progress=None, stop_event=None) -> dict[str, Any]:
         oc_session = self.sessions.get(session.session_id, session.session_id)
-        prompt = _shared_prompt(self.config, message, context)
+        prompt = _shared_prompt(self.config, message, context, self.config.get("mode", "plan"))
         if self.mode == "server":
             return self._send_server(oc_session, prompt, on_progress,
                                      stop_event)
@@ -546,7 +547,7 @@ class OpenCodeHarness(BaseHarness):
 
     def _build_prompt(self, message: str, context: dict[str, Any] | None) -> str:
         # legacy alias: kept so plugins subclassing OpenCodeHarness keep working
-        return _shared_prompt(self.config, message, context)
+        return _shared_prompt(self.config, message, context, self.config.get("mode", "plan"))
 
 
 # ----------------------------------------------------------------------------
@@ -588,7 +589,7 @@ class OpenClawHarness(BaseHarness):
 
     def send(self, session: HarnessSession, message: str,
              context: dict[str, Any] | None = None) -> dict[str, Any]:
-        prompt = _shared_prompt(self.config, message, context)
+        prompt = _shared_prompt(self.config, message, context, self.config.get("mode", "plan"))
         if self.mode == "server":
             # one session key per chat session, sent as its own label
             session_key = (self.config.get("sessionKey")
@@ -661,7 +662,7 @@ class HermesHarness(BaseHarness):
 
     def send(self, session: HarnessSession, message: str,
              context: dict[str, Any] | None = None) -> dict[str, Any]:
-        prompt = _shared_prompt(self.config, message, context)
+        prompt = _shared_prompt(self.config, message, context, self.config.get("mode", "plan"))
         cmd = self.config.get("command", "hermes")
         try:
             proc = subprocess.run(
@@ -747,7 +748,7 @@ class HarnessManager:
 
     def chat(self, harness: str, message: str, session_id: str = "primary",
              context: dict[str, Any] | None = None,
-             on_progress=None, stop_event=None) -> dict[str, Any]:
+             on_progress=None, stop_event=None, mode: str = "plan") -> dict[str, Any]:
         """One agentic turn; returns the harness response dict.
 
         on_progress (optional) is forwarded to harnesses that stream
@@ -755,6 +756,7 @@ class HarnessManager:
         stop_event (optional threading.Event) aborts the wait loop promptly
         when the user presses Stop (the harness-side run is aborted by
         ChatHandler.stop separately).
+        mode: plan (read-only) | build (docs + page actions).
         """
         h = self._harness(harness)
         live = self.sessions.setdefault(harness, {})
@@ -763,6 +765,9 @@ class HarnessManager:
             _h_log.info("starting %s session '%s'", harness, session_id)
             sess = live[session_id] = h.start_session(session_id, context or {})
         sess.record("user", message)
+        # mode goes into the harness config so _shared_prompt sees it
+        if isinstance(getattr(h, "config", None), dict):
+            h.config = {**h.config, "mode": mode}
         try:
             send = h.send
             import inspect as _inspect

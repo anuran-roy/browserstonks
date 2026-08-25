@@ -209,6 +209,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
                               auth_store=auth_store)
             # wire the tab HTML reader for harness tab.read/tab.process
             chat.tab_reader = integration.request_tab_html
+            # wire the page-op caller for harness tab.action
+            chat.page_caller = integration.page_action
             enabled.append(integration)
         else:
             enabled.append(cls(planner, chat_handler=chat,

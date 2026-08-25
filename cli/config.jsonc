@@ -23,6 +23,8 @@
   },
   "answersFile": "answers.jsonc",
   "docsDir": "docs",
+  // chat mode: plan (read-only, default) | build (docs + page actions)
+  "mode": "plan",
   // generated content (doc.create) is written to media/<sessionId>/;
   // when storage.enabled, it is ALSO uploaded to managed storage and
   // the doc.open event points at the served URL.
