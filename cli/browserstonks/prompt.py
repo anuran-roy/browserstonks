@@ -21,6 +21,7 @@ _MODES = {
     "build": {
         "actions": ["tab.new", "tab.open", "tab.close", "tab.read",
                     "tab.process", "tab.focus", "tab.action",
+                    "tab.edit", "tab.submit",
                     "doc.create", "doc.modify", "doc.delete"],
         "doc": True,
     },
@@ -53,6 +54,13 @@ def _action_lines(mode: str) -> str:
                                      select(selector, value) / submit() — same ops as the
                                      form-filling pipeline. args is a JSON array, e.g.
                                      [[tab.action|42|fill|["#email","me@x.com"]]]
+  [[tab.edit|<tabIdOrUrl>|<selector>|<spec>]]  edit the DOM of matching elements:
+                                     spec is JSON — {"html": "..."} to replace innerHTML,
+                                     {"text": "..."} to replace text, {"attrs": {...}} to
+                                     set attributes, {"remove": true} to delete elements.
+                                     Example: [[tab.edit|42|#msg|{"html":"<p>hi</p>"}]]
+  [[tab.submit|<tabIdOrUrl>]]      submit the form closest to the last element you
+                                     edited/filled (or the page's first submit button).
   [[doc.create|<format>|<filename>]] create a document; format is html, markdown, or text.
                                      Put the document body in a fenced code block
                                      (```html / ```markdown / ```text) in the same reply.

@@ -468,6 +468,26 @@ class ChatHandler:
                             "result": entry.get("result"),
                             "error": entry.get("error"),
                         })
+                elif op == "tab.edit":
+                    # [[tab.edit|<tabIdOrUrl>|<selector>|<json-spec>]]
+                    if len(args) < 2:
+                        applied.append({"op": op, "ok": False,
+                                        "error": "needs <tabIdOrUrl> <selector> [spec]"})
+                        continue
+                    entry = await self._tab_action(
+                        [args[0], "edit", args[2] if len(args) > 2 else "{}"], result)
+                    applied.append({"op": op, "url": entry.get("url"),
+                                    "tabId": entry.get("tab_id"),
+                                    "ok": entry.get("ok", False),
+                                    "error": entry.get("error")})
+                elif op == "tab.submit":
+                    # [[tab.submit|<tabIdOrUrl>]]
+                    entry = await self._tab_action(
+                        [args[0] if args else "", "submit", "[]"], result)
+                    applied.append({"op": op, "url": entry.get("url"),
+                                    "tabId": entry.get("tab_id"),
+                                    "ok": entry.get("ok", False),
+                                    "error": entry.get("error")})
                 else:
                     _act_log.warning("unknown action op '%s' (args=%s)", op, args)
                     applied.append({"op": op, "ok": False,

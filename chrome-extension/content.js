@@ -156,6 +156,7 @@
       }
       el.focus?.();
       el.value = value;
+      window.__bsLastEdited = el;  // submit() can find the enclosing form
       dispatch(el, "input");
       dispatch(el, "change");
       return true;
@@ -177,10 +178,39 @@
       return true;
     }
     if (op === "submit") {
+      // submit the form containing the LAST element touched by page.set,
+      // or the first submit button on the page when nothing was touched
+      const target = window.__bsLastEdited;
+      if (target) {
+        const form = target.closest("form");
+        if (form) { form.requestSubmit ? form.requestSubmit() : form.submit(); return true; }
+        // no enclosing form: nearest submit/button in the same container
+        const scope = target.closest("section,div,main,body");
+        const btn = scope?.querySelector(
+          'button[type="submit"], input[type="submit"], [role="button"][aria-label*="Submit" i]');
+        if (btn) { btn.click(); return true; }
+      }
       const btn = document.querySelector(
-        '[role="button"][aria-label*="Submit"], button[type="submit"], input[type="submit"]');
-      if (btn) btn.click();
-      return !!btn;
+        '[role="button"][aria-label*="Submit" i], button[type="submit"], input[type="submit"]');
+      if (btn) { btn.click(); return true; }
+      return false;
+    }
+    if (op === "edit") {
+      // tab.edit: modify the DOM of elements matching a selector.
+      // args: [selector, {html?|text?|attrs?|remove?}]
+      const [selector, spec = {}] = args;
+      const els = document.querySelectorAll(selector);
+      if (!els.length) throw new Error(`selector not found: ${selector}`);
+      for (const el of els) {
+        if (spec.html !== undefined) el.innerHTML = spec.html;
+        else if (spec.text !== undefined) el.textContent = spec.text;
+        if (spec.attrs) for (const [k, v] of Object.entries(spec.attrs)) el.setAttribute(k, v);
+        if (spec.remove) el.remove();
+        window.__bsLastEdited = el;
+        dispatch(el, "input");
+        dispatch(el, "change");
+      }
+      return els.length;
     }
     throw new Error(`unknown page op: ${op}`);
   }
