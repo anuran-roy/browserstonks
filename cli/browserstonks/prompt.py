@@ -41,14 +41,13 @@ def _action_lines(mode: str) -> str:
                                              ...          # HTML is the page source (str)
                                              return {...}  # JSON-serializable result
                                      Your code runs in Pyodide (CPython/WASM); stdlib only.
-                                     The return value comes back to you in the next turn."""
-    if mode == "plan":
-        return base + """
-  [[tab.focus|<tabId>]]             bring an already-open tab to the front (no new tab).
+                                     The return value comes back to you in the next turn.
+  [[tab.focus|<tabId>]]               Bring an already-open tab to the front (no new tab).
   After browsing, clean up: close tabs you opened with [[tab.close|…]]."""
+    if mode == "plan":
+        return base
     # build mode
     return base + """
-  [[tab.focus|<tabId>]]             bring an already-open tab to the front (no new tab).
   [[tab.action|<tabIdOrUrl>|<op>|<args>]]  act on a page:
                                      op is fill(selector, value) / click(selector) /
                                      select(selector, value) / submit() — same ops as the

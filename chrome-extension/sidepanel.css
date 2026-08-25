@@ -55,6 +55,9 @@ header .mode-select { flex: 0 0 auto; }
 .thinking-text { color: var(--muted); font-size: 12px; white-space: pre-wrap;
   max-height: 120px; overflow-y: auto; border-left: 2px solid var(--border);
   padding-left: 8px; }
+.text-part { margin: 4px 0; }
+.text-part.live-text { opacity: 0.92; }
+details.reasoning { margin: 4px 0; font-size: 12px; }
 .pulse { display: inline-block; width: 7px; height: 7px; margin-left: 6px;
   border-radius: 50%; background: var(--accent); animation: blink 1.2s infinite; }
 .pulse.hidden { display: none; }

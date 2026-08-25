@@ -115,12 +115,12 @@ function App() {
     () => localStorage.getItem("bs:activeSession") || ("sp-" + Date.now().toString(36)));
   const [savedSessions, setSavedSessions] = useState([]);
   const [connected, setConnected] = useState(false);
-  const [progress, setProgress] = useState(null); // {text, reasoning, ts}
+  const [progress, setProgress] = useState(null); // {parts: [{type, text}], ts}
   const [stopping, setStopping] = useState(false);
   const eventTabsRef = useRef(new Map()); // url -> real tab id (CLI-opened tabs)
   const [, forceTick] = useState(0);
   const listRef = useRef(null);
-  const progressRef = useRef({ text: "", reasoning: "" });
+  const progressRef = useRef({ parts: [] });
 
   // persist the active session/harness so reopening the panel resumes it
   useEffect(() => {
@@ -161,10 +161,11 @@ function App() {
     const listener = (msg, _sender, sendResponse) => {
       if (msg.type === "CHAT_PROGRESS") {
         const buf = progressRef.current;
-        if (msg.partType === "reasoning") buf.reasoning += msg.text;
-        else buf.text += msg.text;
-        setProgress({ text: buf.text, reasoning: buf.reasoning,
-                      ts: Date.now() });
+        const kind = msg.partType === "reasoning" ? "reasoning" : "text";
+        const last = buf.parts[buf.parts.length - 1];
+        if (last && last.type === kind) last.text += msg.text;
+        else buf.parts.push({ type: kind, text: msg.text });
+        setProgress({ parts: buf.parts.map((p) => ({ ...p })), ts: Date.now() });
       }
       if (msg.type === "EVENT_TAB") {
         // background opened a real tab for a CLI event — remember the
@@ -284,8 +285,8 @@ function App() {
     setInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);
     setBusy(true);
-    progressRef.current = { text: "", reasoning: "" };
-    setProgress({ text: "", reasoning: "", ts: Date.now() });
+    progressRef.current = { parts: [] };
+    setProgress({ parts: [], ts: Date.now() });
     // completion watchdog: the CLI pushes CHAT_COMPLETED exactly once per
     // turn (ok/error/timeout/stopped). If the normal reply callback never
     // fires (hung handler, lost response), this unblocks the UI anyway.
@@ -304,11 +305,13 @@ function App() {
       if (resp?.error) {
         setMessages((m) => [...m, { role: "assistant", content: `⚠️ ${resp.error}`, error: true }]);
       } else {
+        const finalParts = progressRef.current.parts.map((p) => ({ ...p }));
         setMessages((m) => [...m, {
           role: "assistant",
           content: resp.reply || "*(empty reply)*",
           actions: resp.actionsApplied || [],
           reasoning: resp.meta?.reasoning || "",
+          parts: finalParts.length ? finalParts : undefined,
         }]);
       }
       done();
@@ -370,13 +373,25 @@ function App() {
         {messages.map((m, i) => (
           <div key={i} className={"bubble " + m.role + (m.error ? " error" : "")}>
             {m.role === "system" && <div className="system-text">{m.content}</div>}
-            {m.reasoning && <details className="reasoning">
-              <summary>💭 thinking</summary>
-              <div className="reasoning-body">{m.reasoning}</div>
-            </details>}
-            {m.role === "assistant"
-              ? <Streamdown>{m.content}</Streamdown>
-              : <div className="user-text">{m.content}</div>}
+            {m.parts?.length
+              // ordered stream: reasoning and text interleaved as they arrived
+              ? m.parts.map((p, j) => p.type === "reasoning"
+                  ? <details key={j} className="reasoning">
+                      <summary>💭 thinking</summary>
+                      <div className="reasoning-body">{p.text}</div>
+                    </details>
+                  : <div key={j} className="text-part">
+                      <Streamdown>{p.text}</Streamdown>
+                    </div>)
+              : <>
+                  {m.reasoning && <details className="reasoning">
+                    <summary>💭 thinking</summary>
+                    <div className="reasoning-body">{m.reasoning}</div>
+                  </details>}
+                  {m.role === "assistant"
+                    ? <Streamdown>{m.content}</Streamdown>
+                    : <div className="user-text">{m.content}</div>}
+                </>}
             {m.actions?.length > 0 && (
               <div className="actions">
                 {m.actions.map((a, j) => (
@@ -393,18 +408,17 @@ function App() {
         ))}
         {busy && (
           <div className="bubble assistant live">
-            {progress?.reasoning && (
-              <div className="thinking-stream">
-                <div className="thinking-label">💭 thinking…</div>
-                <div className="thinking-text">{progress.reasoning.slice(-600)}</div>
-              </div>
-            )}
-            {progress?.text
-              ? <Streamdown>{progress.text}</Streamdown>
-              : <span className="thinking-label">
-                  {progress?.reasoning ? "" : "waiting for the model…"}
-                </span>}
-            <span className={"pulse" + (progress?.text ? " hidden" : "")} />
+            {progress?.parts?.length
+              ? progress.parts.map((p, j) => p.type === "reasoning"
+                  ? <div key={j} className="thinking-stream">
+                      <div className="thinking-label">💭 thinking…</div>
+                      <div className="thinking-text">{p.text.slice(-800)}</div>
+                    </div>
+                  : <div key={j} className="text-part live-text">
+                      <Streamdown>{p.text}</Streamdown>
+                    </div>)
+              : <span className="thinking-label">waiting for the model…</span>}
+            <span className={"pulse" + (progress?.parts?.length ? " hidden" : "")} />
           </div>
         )}
       </div>
