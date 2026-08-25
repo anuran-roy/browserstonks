@@ -351,6 +351,28 @@ class OpenCodeHarness(BaseHarness):
             except ValueError:
                 pass
 
+    # ------------------------------------------------------------------ env
+    def _env_model(self) -> dict[str, str] | None:
+        """Model config picked up from .env when the harness config doesn't
+        pin one. OPENCODE_MODEL_PROVIDER/OPENCODE_MODEL_ID drive the
+        {providerID, modelID} body field on every prompt.
+
+        Also understands the local-provider names (lmstudio/llamacpp/llmd/
+        ollama) via their *_MODEL_ID vars — e.g. OLLAMA_MODEL_ID=llama3
+        with OLLAMA_MODEL_PROVIDER unset defaults to provider 'ollama'.
+        """
+        import os
+        provider = os.environ.get("OPENCODE_MODEL_PROVIDER", "")
+        model_id = os.environ.get("OPENCODE_MODEL_ID", "")
+        if not model_id:
+            # local fallbacks: OLLAMA_MODEL_ID / LMSTUDIO_MODEL_ID / etc.
+            for kind in ("lmstudio", "llamacpp", "llmd", "ollama"):
+                mid = os.environ.get(f"{kind.upper()}_MODEL_ID", "")
+                if mid:
+                    return {"providerID": provider or kind, "modelID": mid}
+            return None
+        return {"providerID": provider, "modelID": model_id}
+
     def _send_server(self, oc_session: str, prompt: str, on_progress,
                      stop_event=None) -> dict[str, Any]:
         """Async prompt + live SSE streaming (no polling).
@@ -365,7 +387,7 @@ class OpenCodeHarness(BaseHarness):
         agent = self.config.get("agent")
         if agent:
             body["agent"] = agent
-        model = self.config.get("model")
+        model = self.config.get("model") or self._env_model()
         if model:
             body["model"] = model
 
@@ -445,6 +467,13 @@ class OpenCodeHarness(BaseHarness):
                             user_ids.add(mid)
                         elif info.get("role") == "assistant":
                             assistant_ids.add(mid)
+                            # model/provider errors surface as finish=None
+                            # with info.error — fail fast so the user sees
+                            # the real cause (e.g. 'No models loaded')
+                            if info.get("error"):
+                                raise HarnessError(
+                                    f"opencode agent error: "
+                                    f"{json.dumps(info.get('error'))[:300]}")
                             if info.get("finish") == "error":
                                 raise HarnessError(
                                     f"opencode agent error: "
@@ -494,6 +523,10 @@ class OpenCodeHarness(BaseHarness):
             assistant_ids.add(mid)
             for p in m.get("parts", []):
                 self._emit_part(p, sent, on_progress)
+            if info.get("error"):
+                raise HarnessError(
+                    f"opencode agent error: "
+                    f"{json.dumps(info.get('error'))[:300]}")
             if info.get("finish") == "error":
                 raise HarnessError(
                     f"opencode agent error: {info.get('error', 'unknown')}")

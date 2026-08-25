@@ -88,6 +88,87 @@ class OpenRouterProvider(OpenAIProvider):
         return self._extract(data)
 
 
+# ---------------------------------------------------- local OpenAI-compatible
+# LM Studio / llama.cpp / llmd / Ollama all speak the OpenAI chat-completions
+# protocol on localhost. Differences: default ports, model naming, and auth
+# (all optional; bearer token when set).
+LOCAL_PROVIDERS: dict[str, dict[str, Any]] = {
+    "lmstudio": {
+        "base_url": "http://127.0.0.1:1234/v1",
+        "key_env": "LMSTUDIO_API_KEY",
+        # LM Studio reports loaded models via GET /v1/models
+        "models_path": "/models",
+    },
+    "llamacpp": {
+        # llama-server default port
+        "base_url": "http://127.0.0.1:8080/v1",
+        "key_env": "LLAMACPP_API_KEY",
+        "models_path": "/models",
+    },
+    "llmd": {
+        "base_url": "http://127.0.0.1:8081/v1",
+        "key_env": "LLMD_API_KEY",
+        "models_path": "/models",
+    },
+    "ollama": {
+        "base_url": "http://127.0.0.1:11434/v1",
+        "key_env": "OLLAMA_API_KEY",
+        # ollama lists models at /v1/models too (OpenAI-compat shim)
+        "models_path": "/models",
+    },
+}
+
+
+class LocalOpenAIProvider(OpenAIProvider):
+    """LM Studio / llama.cpp / llmd / Ollama — OpenAI-compatible localhost
+    servers. API key optional (bearer when provided; many local servers
+    accept any non-empty key or none at all)."""
+
+    def __init__(self, **opts: Any) -> None:
+        kind = opts.pop("local_kind", "lmstudio")
+        spec = LOCAL_PROVIDERS.get(kind, LOCAL_PROVIDERS["lmstudio"])
+        opts.setdefault("base_url", spec["base_url"])
+        super().__init__(**opts)
+        self.local_kind = kind
+        self.local_spec = spec
+
+    def _headers(self) -> dict[str, str]:
+        # auth is OPTIONAL for local servers: send bearer only when a key
+        # is configured (LM Studio/llama.cpp/llmd ignore it; Ollama checks
+        # it only when OLLAMA_API_KEY is set server-side)
+        if self.api_key and self.api_key.strip():
+            return {"Authorization": f"Bearer {self.api_key}"}
+        return {}
+
+    def complete(self, system: str, user: str) -> str:
+        base = self.opts.get("base_url", self.local_spec["base_url"]).rstrip("/")
+        data = self._post(
+            f"{base}/chat/completions",
+            self._headers(),
+            {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "temperature": self.opts.get("temperature", 0),
+            },
+        )
+        return self._extract(data)
+
+    def list_models(self) -> list[str]:
+        """Query the server's model list (GET /v1/models)."""
+        base = self.opts.get("base_url", self.local_spec["base_url"]).rstrip("/")
+        req = urllib.request.Request(base + self.local_spec["models_path"],
+                                     headers=self._headers())
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            return [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+        except Exception as e:  # noqa: BLE001
+            raise LLMError(f"could not list models from {base}: {e}") from e
+
+
 class AnthropicProvider(BaseProvider):
     name = "anthropic"
 
@@ -127,8 +208,15 @@ PROVIDERS: dict[str, type[BaseProvider]] = {
     "openai": OpenAIProvider,
     "openrouter": OpenRouterProvider,
     "anthropic": AnthropicProvider,
+    "lmstudio": LocalOpenAIProvider,
+    "llamacpp": LocalOpenAIProvider,
+    "llmd": LocalOpenAIProvider,
+    "ollama": LocalOpenAIProvider,
     "offline": OfflineProvider,
 }
+
+# providers whose API key is optional (local servers)
+OPTIONAL_KEY_PROVIDERS = set(LOCAL_PROVIDERS)
 
 
 def make_provider(cfg: dict[str, Any]) -> BaseProvider:
@@ -140,12 +228,16 @@ def make_provider(cfg: dict[str, Any]) -> BaseProvider:
             f"unknown LLM provider '{name}'. available: {sorted(PROVIDERS)}"
         )
     key = cfg.get("api_key") or os.environ.get(f"{name.upper()}_API_KEY", "")
-    if key.startswith("${") or not key.strip():
+    if key.startswith("${"):
+        key = ""  # unset env var expanded to the literal placeholder
+    if not key.strip() and name not in OPTIONAL_KEY_PROVIDERS:
         if name != "offline":
             raise LLMError(
                 f"no API key for '{name}': set llm.api_key in config.jsonc "
                 f"or {name.upper()}_API_KEY in .env"
             )
         key = ""
-    opts = {k: v for k, v in cfg.items() if k not in ("provider", "api_key")}
-    return cls(api_key=key, **opts)
+    opts = {k: v for k, v in cfg.items() if k not in ("provider", "api_key", "model")}
+    if cls is LocalOpenAIProvider:
+        opts["local_kind"] = name  # picks port/defaults per provider
+    return cls(api_key=key, model=cfg.get("model", ""), **opts)
