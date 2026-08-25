@@ -18,6 +18,11 @@ First integration for the BrowserStonks CLI: it turns Chromium into an
    (💭 thinking), and connection drops/reconnects show inline in the chat.
    Reopening the panel resumes the last active chat session
    (localStorage pointer + transcript reload from the CLI store).
+   A plan/build mode toggle in the header sets whether the agent is
+   read-only (plan) or can create docs and act on pages (build).
+   Long turns stream the model's thinking and text **interleaved** in
+   arrival order (not mashed into one thinking block).
+   (localStorage pointer + transcript reload from the CLI store).
 5. Shows a floating BrowserStonks-logo button on the right edge of every
    page — one click opens the chat panel from any webpage (no toolbar
    needed); falls back to a popup window when Chrome blocks the

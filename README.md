@@ -49,6 +49,8 @@ What began as form-filling automation is now a general browser-agent platform: t
 - The CLI applies actions: opens/closes real tabs, writes HTML/markdown/text docs to `media/<sessionId>/` and opens them — optionally publishing to managed storage (Cloudinary default, S3, GCS) and opening the served URL
 - **Live model thinking** — the model's reasoning stream renders in the panel while it works (💭 thinking); the final message keeps a collapsible full-reasoning section
 - **Stop button** — terminate any running turn instantly (aborts the harness-side run too, e.g. OpenCode session abort); hung responses can't freeze the UI (guaranteed `chat.completed` signal + hard turn timeout + client safety nets)
+- **Plan / build modes** — a toggle in the chat panel header: `📋 plan` is read-only (open/close/read/process/focus tabs), `🔨 build` adds document create/modify/delete and page actions (`tab.action` fill/click/select/submit, `tab.edit` DOM editing, `tab.submit` form submission). Mode is per-message from the panel, never config.
+- **Multi-window focus tracking** — the CLI tracks which window is focused and which tab is active *in the focused window*; the harness prompt calls out the CURRENT TAB explicitly, and `tab.new` dedupes (focuses an already-open tab instead of duplicating it)
 - **Session history** — every conversation is persisted under `cli/sessions/`; a picker below the harness dropdown lists saved sessions (title + message count), restores transcripts, and continues where you left off
 - **Session auto-restore** — closing the sidepanel with a chat open and reopening it resumes that exact conversation (active session + harness remembered in localStorage; transcript reloaded from the CLI store)
 - **Floating panel button** — a BrowserStonks logo button hugs the right edge of every page; one click opens the chat panel from any webpage (no toolbar needed), with a popup-window fallback when Chrome blocks the side-panel gesture
@@ -207,6 +209,25 @@ cli/                     Python CLI
 - [x] OpenClaw gateway verified at transport level; Hermes is CLI-driven (provider-limited).
 
 ## Changelog
+
+### 2026-08-25 (later still) — Modes, local models, multi-window correctness
+- **Plan / build chat modes**: `📋 plan` (read-only: tabs only, model cleans
+  up after itself) vs `🔨 build` (doc.create/modify/delete + page actions).
+  Toggle lives in the chat panel header, persisted to localStorage, sent
+  per-message; actions outside the mode are filtered and reported failed.
+- **New build-mode actions**: `tab.edit` (DOM editing per CSS selector:
+  html/text/attrs/remove), `tab.submit` (submits the form closest to the
+  last edited/filled element), `tab.action` (fill/click/select/submit relay).
+- **Multi-window focus tracking**: windows carry `focused` state, tab
+  activation clears the global "current tab" marker, and the harness prompt
+  calls out CURRENT TAB explicitly; `tab.new` dedupes to focus existing tabs.
+- **Thinking interleaving fixed**: streamed thinking/text now render in
+  arrival order (ordered part stream) instead of all thinking mashed into
+  one section.
+- **Local LLM providers**: lmstudio / llamacpp / llmd / ollama with optional
+  bearer auth; OpenCode harness picks model from `.env`
+  (`OPENCODE_MODEL_PROVIDER/ID`, `<KIND>_MODEL_ID` shorthand); model/provider
+  errors surface fast in chat.
 
 ### 2026-08-25 (later) — Panel access & session continuity
 - **Floating panel button**: BrowserStonks-logo button on the right edge of every page; click opens the chat sidepanel from any webpage (popup-window fallback when Chrome 127+ blocks content-script `sidePanel.open` gestures); drag behaviour deferred

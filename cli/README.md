@@ -115,6 +115,22 @@ config values support `${VAR}` expansion from the environment.
 Any harness via the `browserstonks_harnesses` plugin group; streaming
 harnesses implement `send(..., on_progress=…)`.
 
+## Chat modes (plan / build)
+
+Every chat turn runs in a mode set by the client (the sidepanel header
+toggle), default `plan`:
+
+- **plan** — read-only: `tab.new/open/close/read/process/focus`. For
+  research and exploration; the model is instructed to clean up tabs it
+  opened.
+- **build** — plan + `doc.create/modify/delete` (docs in
+  `media/<sessionId>/`) + page actions: `tab.action` (fill/click/select/
+  submit), `tab.edit` (DOM edits per selector), `tab.submit` (submits the
+  form closest to the last edited element).
+
+Actions outside the mode's allowed set are filtered and reported as failed.
+The mode rides the chat message (`{"mode": "build"}`), never config.jsonc.
+
 ## Sessions & persistence
 
 - Chat transcripts persist per session under `sessions/` (JSON, one file
