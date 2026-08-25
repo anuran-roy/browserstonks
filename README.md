@@ -111,19 +111,9 @@ The event bus records browser events when no browser is attached, so the same ac
 
 ## Quick start
 
-**Secure internet mode** — expose the CLI beyond localhost safely:
-issue connection tokens (`browserstonks tokens issue --label my-laptop`),
-enable `"auth": { "required": true }` in config.jsonc (token DB: SQLite by
-default; Postgres/Mongo DSN supported), and turn on **Secure auth** in the
-extension popup, pasting the token. Connections without a valid token are
-refused. Enable `"storage": { "enabled": true, "provider": "cloudinary" }`
-(with credentials in `.env`) to publish generated docs online — the
-`doc.open` action then opens the hosted URL.
+**Secure internet mode** — expose the CLI beyond localhost safely: issue connection tokens (`browserstonks tokens issue --label my-laptop`), enable `"auth": { "required": true }` in config.jsonc (token DB: SQLite by default; Postgres/Mongo DSN supported), and turn on **Secure auth** in the extension popup, pasting the token. Connections without a valid token are refused. Enable `"storage": { "enabled": true, "provider": "cloudinary" }` (with credentials in `.env`) to publish generated docs online — the `doc.open` action then opens the hosted URL.
 
-One-command setup — installs the CLI, the agent harnesses (OpenCode,
-OpenClaw, Hermes), builds the extension sidepanel, auto-configures
-`config.jsonc` (detecting running servers and reading the OpenClaw
-token from `~/.openclaw`), validates with `doctor`, and starts serving:
+One-command setup — installs the CLI, the agent harnesses (OpenCode, OpenClaw, Hermes), builds the extension sidepanel, auto-configures `config.jsonc` (detecting running servers and reading the OpenClaw token from `~/.openclaw`), validates with `doctor`, and starts serving:
 
 ```
 cd cli
@@ -210,31 +200,20 @@ cli/                     Python CLI
 
 ## Changelog
 
-### 2026-08-25 (later still) — Modes, local models, multi-window correctness
-- **Plan / build chat modes**: `📋 plan` (read-only: tabs only, model cleans
-  up after itself) vs `🔨 build` (doc.create/modify/delete + page actions).
-  Toggle lives in the chat panel header, persisted to localStorage, sent
-  per-message; actions outside the mode are filtered and reported failed.
-- **New build-mode actions**: `tab.edit` (DOM editing per CSS selector:
-  html/text/attrs/remove), `tab.submit` (submits the form closest to the
-  last edited/filled element), `tab.action` (fill/click/select/submit relay).
-- **Multi-window focus tracking**: windows carry `focused` state, tab
-  activation clears the global "current tab" marker, and the harness prompt
-  calls out CURRENT TAB explicitly; `tab.new` dedupes to focus existing tabs.
-- **Thinking interleaving fixed**: streamed thinking/text now render in
-  arrival order (ordered part stream) instead of all thinking mashed into
-  one section.
-- **Local LLM providers**: lmstudio / llamacpp / llmd / ollama with optional
-  bearer auth; OpenCode harness picks model from `.env`
-  (`OPENCODE_MODEL_PROVIDER/ID`, `<KIND>_MODEL_ID` shorthand); model/provider
-  errors surface fast in chat.
+### 2026-08-25
+#### Modes, local models, multi-window correctness
+- **Plan / build chat modes**: `📋 plan` (read-only: tabs only, model cleans up after itself) vs `🔨 build` (doc.create/modify/delete + page actions). Toggle lives in the chat panel header, persisted to localStorage, sent per-message; actions outside the mode are filtered and reported failed.
+- **New build-mode actions**: `tab.edit` (DOM editing per CSS selector: html/text/attrs/remove), `tab.submit` (submits the form closest to the last edited/filled element), `tab.action` (fill/click/select/submit relay).
+- **Multi-window focus tracking**: windows carry `focused` state, tab activation clears the global "current tab" marker, and the harness prompt calls out CURRENT TAB explicitly; `tab.new` dedupes to focus existing tabs.
+- **Thinking interleaving fixed**: streamed thinking/text now render in arrival order (ordered part stream) instead of all thinking mashed into one section.
+- **Local LLM providers**: lmstudio / llamacpp / llmd / ollama with optional bearer auth; OpenCode harness picks model from `.env` (`OPENCODE_MODEL_PROVIDER/ID`, `<KIND>_MODEL_ID` shorthand); model/provider errors surface fast in chat.
 
-### 2026-08-25 (later) — Panel access & session continuity
+#### Panel access & session continuity
 - **Floating panel button**: BrowserStonks-logo button on the right edge of every page; click opens the chat sidepanel from any webpage (popup-window fallback when Chrome 127+ blocks content-script `sidePanel.open` gestures); drag behaviour deferred
 - **Session auto-restore**: the sidepanel reopens into the last active chat session — active session id + harness persisted in localStorage, transcript reloaded from the CLI session store; deleting the active session starts fresh
 - Fix: `OPEN_CHAT_PANEL` handler crashed on an undefined `sender` (renamed listener parameter) — the floating button's click never opened the panel
 
-### 2026-08-25 — Secure internet mode and content publishing
+#### Secure internet mode and content publishing
 - **Connection-token auth**: `browserstonks tokens issue/revoke/list`; SHA-256-hashed tokens in SQLite (default) / Postgres / Mongo; websocket auth gate (`auth.required`) closes unauthenticated connections; extension **Secure auth** checkbox + token field in the popup
 - **Managed storage**: `doc.create` uploads to **Cloudinary (default) / S3 / GCS** after the local write (raw HTTP, no SDKs); `doc.open` opens the hosted URL
 - Generated content moved to `media/<sessionId>/` (per-session folders); `cli/docs/` unignored and reserved for developer documentation
