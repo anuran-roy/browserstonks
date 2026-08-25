@@ -211,6 +211,9 @@ def cmd_serve(args: argparse.Namespace) -> int:
             chat.tab_reader = integration.request_tab_html
             # wire the page-op caller for harness tab.action
             chat.page_caller = integration.page_action
+            # the integration announces its type (browser:full | shell | …);
+            # the chat handler reads it live each turn via this lambda
+            chat._integration_type_getter = lambda: integration.integration_type
             enabled.append(integration)
         else:
             enabled.append(cls(planner, chat_handler=chat,

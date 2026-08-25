@@ -76,6 +76,10 @@ function connect() {
         ws.send(JSON.stringify({ type: "auth", token: cfg.token }));
         log("auth token sent");
       }
+      // announce the integration type (drives the CLI's action vocabulary);
+      // sent after auth so the token gate still sees auth first
+      ws.send(JSON.stringify({ type: "integration.hello",
+                               integration: "browser:full" }));
       broadcastConnState(true);
       while (pending.length) {
         const m = pending.shift();

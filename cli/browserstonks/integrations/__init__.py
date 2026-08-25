@@ -42,6 +42,18 @@ class BaseIntegration:
         mtype = msg.get("type", "")
         _dbg("dispatch %s (requestId=%s)", mtype, msg.get("requestId"))
 
+        # client announces its kind: browser:full | browser:headless |
+        # shell | tool | harness — drives the action vocabulary the
+        # harnesses are taught and what actions are permitted
+        if mtype == "integration.hello":
+            itype = msg.get("integration", "")
+            valid = {"browser:full", "browser:headless", "shell",
+                     "tool", "harness"}
+            self.integration_type = itype if itype in valid else "browser:full"
+            _ws_log.info("integration type: %s", self.integration_type)
+            return {"type": "integration.ack",
+                    "integration": self.integration_type}
+
         # tab HTML replies (fufilled by the extension asynchronously)
         if mtype == "tab.read.response":
             fut = self._read_futures.get(msg.get("requestId", ""))
@@ -151,6 +163,10 @@ class WebSocketIntegration(BaseIntegration):
         self.auth_store = auth_store
         self._conn = None
         self._read_futures: dict[str, asyncio.Future] = {}
+        # integration type announced by the connected client
+        # (browser:full | browser:headless | shell | tool | harness);
+        # default assumes the full browser extension
+        self.integration_type = "browser:full"
         # serialize ALL sends: websockets raises/corrupts on concurrent
         # send() calls from different tasks (progress emits from executor
         # threads race with dispatch replies otherwise)

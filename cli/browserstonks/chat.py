@@ -226,6 +226,13 @@ class ChatHandler:
         context = self._context()
         if history_block:
             context["_history"] = history_block
+        # the connected client's kind (browser:full | shell | tool | …)
+        # shapes the action vocabulary taught to the harness
+        getter = getattr(self, "_integration_type_getter", None)
+        integration = getter() if callable(getter) else "browser:full"
+        context["integration"] = integration
+        # remembered for _apply_actions' allowed-action filtering
+        self._turn_integration = integration
         _chat_log.info("turn start %s/%s (message %d chars%s)",
                        harness, session_id, len(message),
                        ", prior history injected" if history_block else "")
@@ -354,7 +361,9 @@ class ChatHandler:
                        session_id: str = "primary",
                        mode: str = "plan") -> list[dict[str, Any]]:
         from .prompt import allowed_actions
-        allowed = allowed_actions(mode)
+        allowed = allowed_actions(mode,
+                                  getattr(self, "_turn_integration",
+                                          "browser:full"))
         applied: list[dict[str, Any]] = []
         for act in actions:
             op = act.get("op", "")
