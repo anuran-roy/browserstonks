@@ -109,6 +109,8 @@ function App() {
   const [harnesses, setHarnesses] = useState([]);
   const [harness, setHarness] = useState(
     () => localStorage.getItem("bs:activeHarness") || "opencode");
+  const [mode, setMode] = useState(
+    () => localStorage.getItem("bs:chatMode") || "plan");
   const [sessionId, setSessionId] = useState(
     () => localStorage.getItem("bs:activeSession") || ("sp-" + Date.now().toString(36)));
   const [savedSessions, setSavedSessions] = useState([]);
@@ -127,6 +129,9 @@ function App() {
   useEffect(() => {
     localStorage.setItem("bs:activeHarness", harness);
   }, [harness]);
+  useEffect(() => {
+    localStorage.setItem("bs:chatMode", mode);
+  }, [mode]);
 
   // on mount: if there's a persisted session with a saved transcript, load it
   const restoredRef = useRef(false);
@@ -295,7 +300,7 @@ function App() {
       return true;
     };
     try {
-      const resp = await chrome.runtime.sendMessage({ type: "CHAT", harness, sessionId, message: text });
+      const resp = await chrome.runtime.sendMessage({ type: "CHAT", harness, sessionId, message: text, mode });
       if (resp?.error) {
         setMessages((m) => [...m, { role: "assistant", content: `⚠️ ${resp.error}`, error: true }]);
       } else {
@@ -329,6 +334,14 @@ function App() {
             .map((h) => (
               <option key={h.name} value={h.name}>{h.display || h.name}</option>
             ))}
+        </select>
+        <select className="mode-select" value={mode}
+                onChange={(e) => setMode(e.target.value)}
+                title={mode === "plan"
+                  ? "Plan mode: read-only — browse/read/process tabs only"
+                  : "Build mode: full — docs, page actions, everything"}>
+          <option value="plan">📋 plan</option>
+          <option value="build">🔨 build</option>
         </select>
       </header>
       <div className="session-bar">

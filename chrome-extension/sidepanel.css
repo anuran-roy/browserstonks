@@ -15,6 +15,7 @@ header .dot.on { background: var(--ok); }
 header .title { font-weight: 700; flex: 1; }
 header select { background: var(--panel); color: var(--text); border: 1px solid var(--border);
   border-radius: 8px; padding: 3px 8px; font-size: 12px; }
+header .mode-select { flex: 0 0 auto; }
 
 /* session picker bar (below the harness select) */
 .session-bar { display: flex; gap: 6px; align-items: center;

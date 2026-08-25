@@ -80,10 +80,6 @@
       },
       "additionalProperties": false
     },
-    "mode": {
-      "type": "string",
-      "description": "Chat mode: plan (read-only) | build (docs + page actions). Default plan."
-    },
     "docsDir": {
       "type": "string",
       "description": "Base directory (config root); generated content is written under media/<sessionId>/ next to it. Kept for compatibility."
